@@ -27,6 +27,10 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "Close", DataType = "REAL" },
                 new FieldDefinition { Name = "Volume", DataType = "REAL" },
                 new FieldDefinition { Name = "PriceUp", DataType = "INTEGER" }, // PriceUp (0 or 1)
+                new FieldDefinition { Name = "PriceUpStreak", DataType = "INTEGER" },
+                new FieldDefinition { Name = "BuyScore", DataType = "INTEGER" },
+                new FieldDefinition { Name = "PercentileBuySignalRank", DataType = "INTEGER" },
+                new FieldDefinition { Name = "FixedBuySignalRank", DataType = "INTEGER" },
                 new FieldDefinition { Name = "SMA", DataType = "REAL" },  // Simple Moving Average
                 new FieldDefinition { Name = "EMA", DataType = "REAL" },  // Exponential Moving Average
                 new FieldDefinition { Name = "ATR", DataType = "REAL" },  // Average True Range
@@ -111,8 +115,6 @@ namespace CryptoCandleMetricsProcessor
 
 
 
-
-
             var mappings = new List<CsvToDbMapping>
             {
                 new CsvToDbMapping { CsvColumnIndex = 0, DbFieldName = "ProductId" },
@@ -144,6 +146,7 @@ namespace CryptoCandleMetricsProcessor
                 Console.WriteLine($"CSV data from {csvFilePath} imported successfully.");
             }
 
+
             TechnicalAnalysis.CalculateIndicators(dbFilePath, tableName);
             Console.WriteLine("Indicators calculated successfully.");
 
@@ -152,5 +155,7 @@ namespace CryptoCandleMetricsProcessor
 
 
         }
+
+        
     }
 }
