@@ -15,6 +15,9 @@ namespace CryptoCandleMetricsProcessor
     {
         static void Main(string[] args)
         {
+            string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
+
+
             var fields = new List<FieldDefinition>
             {
                 new FieldDefinition { Name = "ProductId", DataType = "TEXT" },
@@ -132,13 +135,8 @@ namespace CryptoCandleMetricsProcessor
             string tableName = "Candles";
             DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
 
-            var csvFilePaths = new List<string>
-            {
-                "C:\\Users\\DELL PC\\Desktop\\Candle Data\\BTC-USDC_FIFTEEN_MINUTE.csv",
-                "C:\\Users\\DELL PC\\Desktop\\Candle Data\\BTC-USDC_FIVE_MINUTE.csv",
-                "C:\\Users\\DELL PC\\Desktop\\Candle Data\\BTC-USDC_ONE_DAY.csv",
-                "C:\\Users\\DELL PC\\Desktop\\Candle Data\\BTC-USDC_ONE_HOUR.csv"
-            };
+            
+            var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
 
             foreach (var csvFilePath in csvFilePaths)
             {
