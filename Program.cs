@@ -15,9 +15,10 @@ namespace CryptoCandleMetricsProcessor
     {
         static void Main(string[] args)
         {
+            // Path to the folder containing CSV files
             string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
 
-
+            // Define the fields for the database table
             var fields = new List<FieldDefinition>
             {
                 new FieldDefinition { Name = "ProductId", DataType = "TEXT" },
@@ -113,11 +114,9 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "Lagged_StochD_1", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_2", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_3", DataType = "REAL" }
-
             };
 
-
-
+            // Define the mappings between CSV columns and database fields
             var mappings = new List<CsvToDbMapping>
             {
                 new CsvToDbMapping { CsvColumnIndex = 0, DbFieldName = "ProductId" },
@@ -131,29 +130,30 @@ namespace CryptoCandleMetricsProcessor
                 new CsvToDbMapping { CsvColumnIndex = 8, DbFieldName = "Volume" }
             };
 
+            // Define the database file path and table name
             string dbFilePath = "candles_data.sqlite";
             string tableName = "Candles";
+
+            // Create the database with the specified table and fields
             DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
 
-            
+            // Get all CSV file paths from the specified folder
             var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
 
+            // Import each CSV file into the database
             foreach (var csvFilePath in csvFilePaths)
             {
                 CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
                 Console.WriteLine($"CSV data from {csvFilePath} imported successfully.");
             }
 
-
+            // Calculate technical analysis indicators
             TechnicalAnalysis.CalculateIndicators(dbFilePath, tableName);
             Console.WriteLine("Indicators calculated successfully.");
 
+            // Export the database to CSV
             CsvExporter.ExportDatabaseToCsv(dbFilePath);
             Console.WriteLine("CSV data exported successfully.");
-
-
         }
-
-        
     }
 }

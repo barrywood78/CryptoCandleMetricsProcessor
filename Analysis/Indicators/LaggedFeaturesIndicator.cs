@@ -8,6 +8,15 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class LaggedFeaturesIndicator
     {
+        /// <summary>
+        /// Calculates lagged features for various indicators and updates the database.
+        /// </summary>
+        /// <param name="connection">The SQLite database connection.</param>
+        /// <param name="transaction">The SQLite transaction for atomic updates.</param>
+        /// <param name="tableName">The name of the table to update.</param>
+        /// <param name="productId">The product ID to filter the data.</param>
+        /// <param name="granularity">The granularity to filter the data.</param>
+        /// <param name="candles">The list of candle data to process.</param>
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles)
         {
             // Calculate all indicators first
@@ -18,54 +27,67 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             var bbResults = candles.GetBollingerBands(20, 2).ToList();
             var stochResults = candles.GetStoch(14, 3, 3).ToList();
 
+            // Iterate through each candle, starting from the 4th index to ensure enough previous periods
             for (int i = 3; i < candles.Count; i++)
             {
                 if (i - 4 < 0) continue; // Ensure there are enough previous periods
 
+                // Calculate lagged features for closing prices
                 var laggedClose1 = candles[i - 1].Close;
                 var laggedClose2 = candles[i - 2].Close;
                 var laggedClose3 = candles[i - 3].Close;
 
+                // Calculate lagged features for RSI
                 var laggedRSI1 = rsiResults[i - 1]?.Rsi;
                 var laggedRSI2 = rsiResults[i - 2]?.Rsi;
                 var laggedRSI3 = rsiResults[i - 3]?.Rsi;
 
+                // Calculate lagged returns
                 var laggedReturn1 = candles[i - 1].Close / candles[i - 2].Close - 1;
                 var laggedReturn2 = candles[i - 2].Close / candles[i - 3].Close - 1;
                 var laggedReturn3 = candles[i - 3].Close / candles[i - 4].Close - 1;
 
+                // Calculate lagged features for EMA
                 var laggedEMA1 = emaResults[i - 1]?.Ema;
                 var laggedEMA2 = emaResults[i - 2]?.Ema;
                 var laggedEMA3 = emaResults[i - 3]?.Ema;
 
+                // Calculate lagged features for ATR
                 var laggedATR1 = atrResults[i - 1]?.Atr;
                 var laggedATR2 = atrResults[i - 2]?.Atr;
                 var laggedATR3 = atrResults[i - 3]?.Atr;
 
+                // Calculate lagged features for MACD
                 var laggedMACD1 = macdResults[i - 1]?.Macd;
                 var laggedMACD2 = macdResults[i - 2]?.Macd;
                 var laggedMACD3 = macdResults[i - 3]?.Macd;
 
+                // Calculate lagged features for Bollinger Bands upper band
                 var laggedBollingerUpper1 = bbResults[i - 1]?.UpperBand;
                 var laggedBollingerUpper2 = bbResults[i - 2]?.UpperBand;
                 var laggedBollingerUpper3 = bbResults[i - 3]?.UpperBand;
 
+                // Calculate lagged features for Bollinger Bands lower band
                 var laggedBollingerLower1 = bbResults[i - 1]?.LowerBand;
                 var laggedBollingerLower2 = bbResults[i - 2]?.LowerBand;
                 var laggedBollingerLower3 = bbResults[i - 3]?.LowerBand;
 
+                // Calculate lagged features for Bollinger Bands %B
                 var laggedBollingerPercentB1 = bbResults[i - 1]?.PercentB;
                 var laggedBollingerPercentB2 = bbResults[i - 2]?.PercentB;
                 var laggedBollingerPercentB3 = bbResults[i - 3]?.PercentB;
 
+                // Calculate lagged features for Stochastic %K
                 var laggedStochK1 = stochResults[i - 1]?.K;
                 var laggedStochK2 = stochResults[i - 2]?.K;
                 var laggedStochK3 = stochResults[i - 3]?.K;
 
+                // Calculate lagged features for Stochastic %D
                 var laggedStochD1 = stochResults[i - 1]?.D;
                 var laggedStochD2 = stochResults[i - 2]?.D;
                 var laggedStochD3 = stochResults[i - 3]?.D;
 
+                // Update the database with the calculated lagged features
                 string updateQuery = $@"
                     UPDATE {tableName}
                     SET Lagged_Close_1 = @LaggedClose1,
@@ -107,6 +129,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
                 using (var command = new SqliteCommand(updateQuery, connection, transaction))
                 {
+                    // Add parameters to the update command
                     command.Parameters.AddWithValue("@LaggedClose1", laggedClose1);
                     command.Parameters.AddWithValue("@LaggedClose2", laggedClose2);
                     command.Parameters.AddWithValue("@LaggedClose3", laggedClose3);
@@ -143,6 +166,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     command.Parameters.AddWithValue("@ProductId", productId);
                     command.Parameters.AddWithValue("@Granularity", granularity);
                     command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+
+                    // Execute the update command
                     command.ExecuteNonQuery();
                 }
             }

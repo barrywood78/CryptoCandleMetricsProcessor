@@ -7,6 +7,14 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class BuySignalIndicator
     {
+        /// <summary>
+        /// Calculates and updates buy signals in the database for the given product and granularity.
+        /// </summary>
+        /// <param name="connection">The SQLite database connection.</param>
+        /// <param name="transaction">The SQLite transaction for atomic updates.</param>
+        /// <param name="tableName">The name of the table to update.</param>
+        /// <param name="productId">The product ID to filter the data.</param>
+        /// <param name="granularity">The granularity to filter the data.</param>
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity)
         {
             // Step 1: Calculate BuyScores
@@ -19,6 +27,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             UpdateBuySignals(connection, transaction, tableName, productId, granularity, allScores);
         }
 
+        // Calculate BuyScores based on predefined rules and update the database
         private static void CalculateBuyScores(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity)
         {
             string updateQuery = $@"
@@ -37,12 +46,15 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
             using (var command = new SqliteCommand(updateQuery, connection, transaction))
             {
+                // Add parameters to the update command
                 command.Parameters.AddWithValue("@ProductId", productId);
                 command.Parameters.AddWithValue("@Granularity", granularity);
+                // Execute the update command
                 command.ExecuteNonQuery();
             }
         }
 
+        // Retrieve all BuyScores from the database for the given product and granularity
         private static List<int> RetrieveAllBuyScores(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity)
         {
             var scores = new List<int>();
@@ -50,11 +62,13 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
             using (var command = new SqliteCommand(selectQuery, connection, transaction))
             {
+                // Add parameters to the select command
                 command.Parameters.AddWithValue("@ProductId", productId);
                 command.Parameters.AddWithValue("@Granularity", granularity);
 
                 using (var reader = command.ExecuteReader())
                 {
+                    // Read and add each BuyScore to the list
                     while (reader.Read())
                     {
                         scores.Add(reader.GetInt32(0));
@@ -65,6 +79,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             return scores;
         }
 
+        // Update BuySignals in the database based on calculated BuyScores
         private static void UpdateBuySignals(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<int> allScores)
         {
             string updateQuery = $@"
@@ -79,19 +94,23 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 foreach (var score in allScores.Distinct())
                 {
+                    // Calculate FixedRank and PercentileRank for each distinct BuyScore
                     var (_, fixedRank, percentileRank) = CalculateBuySignals(score, allScores);
 
+                    // Clear previous parameters and add new ones
                     command.Parameters.Clear();
                     command.Parameters.AddWithValue("@FixedRank", fixedRank);
                     command.Parameters.AddWithValue("@PercentileRank", percentileRank);
                     command.Parameters.AddWithValue("@ProductId", productId);
                     command.Parameters.AddWithValue("@Granularity", granularity);
                     command.Parameters.AddWithValue("@BuyScore", score);
+                    // Execute the update command
                     command.ExecuteNonQuery();
                 }
             }
         }
 
+        // Calculate FixedRank and PercentileRank based on the BuyScore and all BuyScores
         public static (int BuyScore, int FixedRank, int PercentileRank) CalculateBuySignals(int buyScore, List<int> allScores)
         {
             int fixedRank = DetermineFixedBuySignalRank(buyScore);
@@ -99,6 +118,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             return (buyScore, fixedRank, percentileRank);
         }
 
+        // Determine the FixedRank based on predefined rules
         private static int DetermineFixedBuySignalRank(int buyScore)
         {
             if (buyScore >= 10) return 3; // Strong Buy
@@ -107,6 +127,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             return 0;                     // No Signal
         }
 
+        // Determine the PercentileRank based on the distribution of BuyScores
         private static int DeterminePercentileBuySignalRank(int buyScore, List<int> allScores)
         {
             int totalCandles = allScores.Count;

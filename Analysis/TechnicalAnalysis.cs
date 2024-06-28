@@ -10,19 +10,28 @@ namespace CryptoCandleMetricsProcessor.Analysis
 {
     public static class TechnicalAnalysis
     {
+        /// <summary>
+        /// Calculates technical analysis indicators for each product and granularity combination in the database.
+        /// </summary>
+        /// <param name="dbFilePath">The path to the SQLite database file.</param>
+        /// <param name="tableName">The name of the table containing the candle data.</param>
         public static void CalculateIndicators(string dbFilePath, string tableName)
         {
             string connectionString = $"Data Source={Path.GetFullPath(dbFilePath)}";
             var groupedCandles = new Dictionary<(string ProductId, string Granularity), List<Quote>>();
 
+            // Open a connection to the SQLite database
             using (var connection = new SqliteConnection(connectionString))
             {
                 connection.Open();
+
+                // Select all relevant columns ordered by ProductId, Granularity, and StartUnix
                 string selectQuery = $"SELECT ProductId, Granularity, StartUnix, StartDate, Open, High, Low, Close, Volume FROM {tableName} ORDER BY ProductId, Granularity, StartUnix";
 
                 using (var command = new SqliteCommand(selectQuery, connection))
                 using (var reader = command.ExecuteReader())
                 {
+                    // Read and group candle data by ProductId and Granularity
                     while (reader.Read())
                     {
                         var key = (ProductId: reader.GetString(0), Granularity: reader.GetString(1));
@@ -43,18 +52,20 @@ namespace CryptoCandleMetricsProcessor.Analysis
                     }
                 }
 
+                // Begin a transaction to ensure all data is inserted atomically
                 using (var transaction = connection.BeginTransaction())
                 {
+                    // Iterate through each product and granularity combination
                     foreach (var group in groupedCandles)
                     {
                         var productId = group.Key.ProductId;
                         var granularity = group.Key.Granularity;
                         var candles = group.Value;
 
-                        // Define custom periods for each indicator
+                        // Define custom periods for each indicator based on granularity
                         var periods = GetPeriodsForGranularity(granularity);
 
-                        // Call individual indicator calculations with custom periods
+                        // Calculate and insert each indicator
                         PriceUpIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
                         PriceUpStreakIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
                         SmaIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["SMA"]);
@@ -79,9 +90,9 @@ namespace CryptoCandleMetricsProcessor.Analysis
                         FibonacciRetracementIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
                         RollingPivotPointsIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, 20, 10, (int)PivotPointType.Standard); // Adjusted line
                         LaggedFeaturesIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-
                     }
 
+                    // Commit the transaction to save all changes
                     transaction.Commit();
                 }
 
@@ -102,9 +113,9 @@ namespace CryptoCandleMetricsProcessor.Analysis
                     transaction.Commit();
                 }
             }
-
         }
 
+        // Returns a dictionary of custom periods for each indicator based on granularity
         private static Dictionary<string, int> GetPeriodsForGranularity(string granularity)
         {
             // Customize periods for each indicator based on granularity
@@ -193,7 +204,7 @@ namespace CryptoCandleMetricsProcessor.Analysis
             };
         }
 
-
+        // Creates indexes on the specified columns and runs the ANALYZE command
         static void CreateIndexesAndAnalyze(string dbFilePath, string tableName)
         {
             using (var connection = new SqliteConnection($"Data Source={dbFilePath}"))
