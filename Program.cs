@@ -34,7 +34,6 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "PriceUpStreak", DataType = "INTEGER" },
                 new FieldDefinition { Name = "BuyScore", DataType = "INTEGER" },
                 new FieldDefinition { Name = "PercentileBuySignalRank", DataType = "INTEGER" },
-                new FieldDefinition { Name = "FixedBuySignalRank", DataType = "INTEGER" },
                 new FieldDefinition { Name = "SMA", DataType = "REAL" },  // Simple Moving Average
                 new FieldDefinition { Name = "EMA", DataType = "REAL" },  // Exponential Moving Average
                 new FieldDefinition { Name = "ATR", DataType = "REAL" },  // Average True Range
@@ -113,7 +112,8 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "Lagged_StochK_3", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_1", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_2", DataType = "REAL" },
-                new FieldDefinition { Name = "Lagged_StochD_3", DataType = "REAL" }
+                new FieldDefinition { Name = "Lagged_StochD_3", DataType = "REAL" },
+                new FieldDefinition { Name = "FixedBuySignalRank", DataType = "INTEGER" } // Target field for ML prediction
             };
 
             // Define the mappings between CSV columns and database fields

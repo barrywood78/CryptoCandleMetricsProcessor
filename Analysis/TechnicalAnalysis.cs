@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Data.Sqlite;
 using System.Globalization;
@@ -52,48 +53,69 @@ namespace CryptoCandleMetricsProcessor.Analysis
                     }
                 }
 
-                // Begin a transaction to ensure all data is inserted atomically
-                using (var transaction = connection.BeginTransaction())
+                // Iterate through each product and granularity combination
+                foreach (var group in groupedCandles)
                 {
-                    // Iterate through each product and granularity combination
-                    foreach (var group in groupedCandles)
+                    var productId = group.Key.ProductId;
+                    var granularity = group.Key.Granularity;
+                    var candles = group.Value;
+
+                    // Define custom periods for each indicator based on granularity
+                    var periods = GetPeriodsForGranularity(granularity);
+
+                    // Dictionary to store indicator names and their corresponding calculation methods
+                    var indicators = new Dictionary<string, Action<SqliteConnection, SqliteTransaction, string, string, string, List<Quote>, Dictionary<string, int>>>
+                {
+                    {"PriceUp", (conn, trans, table, prod, gran, c, p) => PriceUpIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"PriceUpStreak", (conn, trans, table, prod, gran, c, p) => PriceUpStreakIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"SMA", (conn, trans, table, prod, gran, c, p) => SmaIndicator.Calculate(conn, trans, table, prod, gran, c, p["SMA"])},
+                    {"EMA", (conn, trans, table, prod, gran, c, p) => EmaIndicator.Calculate(conn, trans, table, prod, gran, c, p["EMA"])},
+                    {"ATR", (conn, trans, table, prod, gran, c, p) => AtrIndicator.Calculate(conn, trans, table, prod, gran, c, p["ATR"])},
+                    {"RSI", (conn, trans, table, prod, gran, c, p) => RsiIndicator.Calculate(conn, trans, table, prod, gran, c, p["RSI"])},
+                    {"ADX", (conn, trans, table, prod, gran, c, p) => AdxIndicator.Calculate(conn, trans, table, prod, gran, c, p["ADX"])},
+                    {"TEMA", (conn, trans, table, prod, gran, c, p) => TemaIndicator.Calculate(conn, trans, table, prod, gran, c, p["TEMA"])},
+                    {"BollingerBands", (conn, trans, table, prod, gran, c, p) => BollingerBandsIndicator.Calculate(conn, trans, table, prod, gran, c, p["BollingerBands"])},
+                    {"Stochastic", (conn, trans, table, prod, gran, c, p) => StochasticIndicator.Calculate(conn, trans, table, prod, gran, c, p["StochasticOscillator"])},
+                    {"MACD", (conn, trans, table, prod, gran, c, p) => MacdIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"Supertrend", (conn, trans, table, prod, gran, c, p) => SupertrendIndicator.Calculate(conn, trans, table, prod, gran, c, p["Supertrend"])},
+                    {"WilliamsR", (conn, trans, table, prod, gran, c, p) => WilliamsRIndicator.Calculate(conn, trans, table, prod, gran, c, p["WilliamsR"])},
+                    {"OBV", (conn, trans, table, prod, gran, c, p) => ObvIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"StatisticalIndicators", (conn, trans, table, prod, gran, c, p) => StatisticalIndicators.Calculate(conn, trans, table, prod, gran, c, p["SMA"])},
+                    {"ADLine", (conn, trans, table, prod, gran, c, p) => AdLineIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"CMF", (conn, trans, table, prod, gran, c, p) => CmfIndicator.Calculate(conn, trans, table, prod, gran, c, p["CMF"])},
+                    {"CCI", (conn, trans, table, prod, gran, c, p) => CciIndicator.Calculate(conn, trans, table, prod, gran, c, p["CCI"])},
+                    {"Ichimoku", (conn, trans, table, prod, gran, c, p) => IchimokuIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"ParabolicSAR", (conn, trans, table, prod, gran, c, p) => ParabolicSarIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"RollingPivotPoints", (conn, trans, table, prod, gran, c, p) => RollingPivotPointsIndicator.Calculate(conn, trans, table, prod, gran, c, (int)PeriodSize.Day, 10, (int)PivotPointType.Standard)},
+                    {"FibonacciRetracement", (conn, trans, table, prod, gran, c, p) => FibonacciRetracementIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                    {"LaggedFeatures", (conn, trans, table, prod, gran, c, p) => LaggedFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)}
+                };
+
+                    int totalIndicators = indicators.Count;
+                    int currentIndicator = 0;
+
+                    // Calculate each indicator with its own transaction
+                    foreach (var indicatorPair in indicators)
                     {
-                        var productId = group.Key.ProductId;
-                        var granularity = group.Key.Granularity;
-                        var candles = group.Value;
+                        currentIndicator++;
+                        string indicatorName = indicatorPair.Key;
+                        var indicator = indicatorPair.Value;
 
-                        // Define custom periods for each indicator based on granularity
-                        var periods = GetPeriodsForGranularity(granularity);
-
-                        // Calculate and insert each indicator
-                        PriceUpIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        PriceUpStreakIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        SmaIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["SMA"]);
-                        EmaIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["EMA"]);
-                        AtrIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["ATR"]);
-                        RsiIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["RSI"]);
-                        AdxIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["ADX"]);
-                        TemaIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["TEMA"]);
-                        BollingerBandsIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["BollingerBands"]);
-                        StochasticIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["StochasticOscillator"]);
-                        MacdIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        SupertrendIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["Supertrend"]);
-                        WilliamsRIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["WilliamsR"]);
-                        ObvIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        StatisticalIndicators.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["SMA"]);
-                        AdLineIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        CmfIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["CMF"]);
-                        CciIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, periods["CCI"]);
-                        IchimokuIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        ParabolicSarIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        RollingPivotPointsIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, (int)PeriodSize.Day, (int)PivotPointType.Standard);
-                        FibonacciRetracementIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
-                        RollingPivotPointsIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles, 20, 10, (int)PivotPointType.Standard); // Adjusted line
-                        LaggedFeaturesIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
+                        using (var transaction = connection.BeginTransaction())
+                        {
+                            try
+                            {
+                                indicator(connection, transaction, tableName, productId, granularity, candles, periods);
+                                transaction.Commit();
+                                Console.WriteLine($"[{currentIndicator}/{totalIndicators}] Calculated {indicatorName} for {productId} - {granularity}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error calculating {indicatorName} for {productId} - {granularity}: {ex.Message}");
+                                transaction.Rollback();
+                            }
+                        }
                     }
-
-                    // Commit the transaction to save all changes
-                    transaction.Commit();
                 }
 
                 // Create indexes and run ANALYZE
@@ -101,16 +123,24 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 Console.WriteLine("Indexes created and ANALYZE run successfully.");
 
                 // Calculate BuySignals for all product/granularity combinations
-                using (var transaction = connection.BeginTransaction())
+                foreach (var group in groupedCandles)
                 {
-                    foreach (var group in groupedCandles)
+                    var productId = group.Key.ProductId;
+                    var granularity = group.Key.Granularity;
+                    using (var transaction = connection.BeginTransaction())
                     {
-                        var productId = group.Key.ProductId;
-                        var granularity = group.Key.Granularity;
-                        BuySignalIndicator.Calculate(connection, transaction, tableName, productId, granularity);
-                        Console.WriteLine($"BuySignal calculated for {productId} - {granularity}");
+                        try
+                        {
+                            BuySignalIndicator.Calculate(connection, transaction, tableName, productId, granularity);
+                            transaction.Commit();
+                            Console.WriteLine($"BuySignal calculated for {productId} - {granularity}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error calculating BuySignal for {productId} - {granularity}: {ex.Message}");
+                            transaction.Rollback();
+                        }
                     }
-                    transaction.Commit();
                 }
             }
         }
@@ -250,6 +280,5 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 }
             }
         }
-
     }
 }
