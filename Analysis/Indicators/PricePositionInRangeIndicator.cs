@@ -11,7 +11,16 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         {
             foreach (var candle in candles)
             {
-                decimal pricePositionInRange = (candle.Close - candle.Low) / (candle.High - candle.Low);
+                decimal pricePositionInRange;
+                if (candle.High != candle.Low)
+                {
+                    pricePositionInRange = (candle.Close - candle.Low) / (candle.High - candle.Low);
+                }
+                else
+                {
+                    // Handle the case where High equals Low to avoid division by zero
+                    pricePositionInRange = 0.5m; // Assuming mid-range when high equals low
+                }
 
                 string updateQuery = $@"
                     UPDATE {tableName}
