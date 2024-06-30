@@ -31,18 +31,44 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         private static void CalculateBuyScores(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity)
         {
             string updateQuery = $@"
-                UPDATE {tableName}
-                SET BuyScore = 
-                    (CASE WHEN RSI > 45 AND RSI < 55 THEN 2 WHEN RSI > 40 AND RSI < 60 THEN 1 ELSE 0 END) +
-                    (CASE WHEN Stoch_K < 80 AND Stoch_K > Stoch_D THEN 1 ELSE 0 END) +
-                    (CASE WHEN ADX > 20 THEN 2 ELSE 0 END) +
-                    (CASE WHEN BB_PercentB > 0.35 AND BB_PercentB < 0.65 THEN 2 WHEN BB_PercentB > 0.25 AND BB_PercentB < 0.75 THEN 1 ELSE 0 END) +
-                    (CASE WHEN CMF > 0 THEN 1 ELSE 0 END) +
-                    (CASE WHEN MACD_Histogram > 0 AND MACD_Histogram > Lagged_MACD_1 THEN 2 WHEN MACD_Histogram > 0 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ADL > Lagged_Close_1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN EMA > SMA THEN 1 ELSE 0 END) +
-                    (CASE WHEN MACD > MACD_Signal THEN 1 ELSE 0 END)
-                WHERE ProductId = @ProductId AND Granularity = @Granularity";
+            UPDATE {tableName}
+            SET BuyScore = 
+                (CASE 
+                    WHEN RSI > 40 AND RSI < 60 THEN 2 
+                    WHEN RSI > 35 AND RSI < 65 THEN 1 
+                    ELSE 0 
+                END) +
+                (CASE WHEN Stoch_K < 80 AND Stoch_K > Stoch_D THEN 1 ELSE 0 END) +
+                (CASE 
+                    WHEN ADX > 25 THEN 3
+                    WHEN ADX > 20 THEN 2 
+                    ELSE 0 
+                END) +
+                (CASE 
+                    WHEN BB_PercentB > 0.3 AND BB_PercentB < 0.7 THEN 2 
+                    WHEN BB_PercentB > 0.2 AND BB_PercentB < 0.8 THEN 1 
+                    ELSE 0 
+                END) +
+                (CASE WHEN CMF > 0 THEN 1 ELSE 0 END) +
+                (CASE 
+                    WHEN MACD_Histogram > 0 AND MACD_Histogram > Lagged_MACD_1 THEN 2 
+                    WHEN MACD_Histogram > 0 THEN 1 
+                    ELSE 0 
+                END) +
+                (CASE WHEN ADL > Lagged_Close_1 THEN 1 ELSE 0 END) +
+                (CASE 
+                    WHEN EMA > SMA AND EMA > Lagged_EMA_1 THEN 2 
+                    WHEN EMA > SMA THEN 1 
+                    ELSE 0 
+                END) +
+                (CASE WHEN MACD > MACD_Signal THEN 1 ELSE 0 END) +
+                (CASE WHEN Volume > Lagged_Close_1 THEN 1 ELSE 0 END) +
+                (CASE 
+                    WHEN ATR > Lagged_ATR_1 * 1.2 THEN 2
+                    WHEN ATR > Lagged_ATR_1 THEN 1
+                    ELSE 0
+                END)
+            WHERE ProductId = @ProductId AND Granularity = @Granularity";
 
             using (var command = new SqliteCommand(updateQuery, connection, transaction))
             {
@@ -83,60 +109,27 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         private static void UpdateBuySignals(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<int> allScores)
         {
             string updateQuery = $@"
-                UPDATE {tableName}
-                SET FixedBuySignalRank = @FixedRank,
-                    PercentileBuySignalRank = @PercentileRank
-                WHERE ProductId = @ProductId
-                  AND Granularity = @Granularity
-                  AND BuyScore = @BuyScore";
+                                UPDATE {tableName}
+                                SET BuySignal = @BuySignal
+                                WHERE ProductId = @ProductId
+                                  AND Granularity = @Granularity
+                                  AND BuyScore = @BuyScore";
 
             using (var command = new SqliteCommand(updateQuery, connection, transaction))
             {
                 foreach (var score in allScores.Distinct())
                 {
-                    // Calculate FixedRank and PercentileRank for each distinct BuyScore
-                    var (_, fixedRank, percentileRank) = CalculateBuySignals(score, allScores);
+                    var buySignal = score >= 14 ? 1 : 0;
 
-                    // Clear previous parameters and add new ones
                     command.Parameters.Clear();
-                    command.Parameters.AddWithValue("@FixedRank", fixedRank);
-                    command.Parameters.AddWithValue("@PercentileRank", percentileRank);
+                    command.Parameters.AddWithValue("@BuySignal", buySignal);
                     command.Parameters.AddWithValue("@ProductId", productId);
                     command.Parameters.AddWithValue("@Granularity", granularity);
                     command.Parameters.AddWithValue("@BuyScore", score);
-                    // Execute the update command
                     command.ExecuteNonQuery();
                 }
             }
         }
 
-        // Calculate FixedRank and PercentileRank based on the BuyScore and all BuyScores
-        public static (int BuyScore, int FixedRank, int PercentileRank) CalculateBuySignals(int buyScore, List<int> allScores)
-        {
-            int fixedRank = DetermineFixedBuySignalRank(buyScore);
-            int percentileRank = DeterminePercentileBuySignalRank(buyScore, allScores);
-            return (buyScore, fixedRank, percentileRank);
-        }
-
-        // Determine the FixedRank based on predefined rules
-        private static int DetermineFixedBuySignalRank(int buyScore)
-        {
-            if (buyScore >= 10) return 3; // Strong Buy
-            if (buyScore >= 7) return 2;  // Moderate Buy
-            if (buyScore >= 4) return 1;  // Weak Buy
-            return 0;                     // No Signal
-        }
-
-        // Determine the PercentileRank based on the distribution of BuyScores
-        private static int DeterminePercentileBuySignalRank(int buyScore, List<int> allScores)
-        {
-            int totalCandles = allScores.Count;
-            var sortedScores = allScores.OrderByDescending(s => s).ToList();
-
-            if (buyScore >= sortedScores[(int)(totalCandles * 0.03)]) return 3; // Strong Buy (Top 3%)
-            if (buyScore >= sortedScores[(int)(totalCandles * 0.15)]) return 2; // Moderate Buy (Top 15%)
-            if (buyScore >= sortedScores[(int)(totalCandles * 0.45)]) return 1; // Weak Buy (Top 45%)
-            return 0; // No Signal
-        }
     }
 }

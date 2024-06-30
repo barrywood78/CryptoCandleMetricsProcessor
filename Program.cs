@@ -33,7 +33,6 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "PriceUp", DataType = "INTEGER" }, // PriceUp (0 or 1)
                 new FieldDefinition { Name = "PriceUpStreak", DataType = "INTEGER" },
                 new FieldDefinition { Name = "BuyScore", DataType = "INTEGER" },
-                new FieldDefinition { Name = "PercentileBuySignalRank", DataType = "INTEGER" },
                 new FieldDefinition { Name = "SMA", DataType = "REAL" },  // Simple Moving Average
                 new FieldDefinition { Name = "EMA", DataType = "REAL" },  // Exponential Moving Average
                 new FieldDefinition { Name = "ATR", DataType = "REAL" },  // Average True Range
@@ -62,11 +61,11 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "ADL", DataType = "REAL" },  // Accumulation/Distribution Line
                 new FieldDefinition { Name = "CMF", DataType = "REAL" },  // Chaikin Money Flow
                 new FieldDefinition { Name = "CCI", DataType = "REAL" },  // Commodity Channel Index
-                new FieldDefinition { Name = "Ichimoku_TenkanSen", DataType = "REAL" },  // Ichimoku Cloud - Tenkan Sen
-                new FieldDefinition { Name = "Ichimoku_KijunSen", DataType = "REAL" },  // Ichimoku Cloud - Kijun Sen
-                new FieldDefinition { Name = "Ichimoku_SenkouSpanA", DataType = "REAL" },  // Ichimoku Cloud - Senkou Span A
-                new FieldDefinition { Name = "Ichimoku_SenkouSpanB", DataType = "REAL" },  // Ichimoku Cloud - Senkou Span B
-                new FieldDefinition { Name = "Ichimoku_ChikouSpan", DataType = "REAL" },  // Ichimoku Cloud - Chikou Span
+                //new FieldDefinition { Name = "Ichimoku_TenkanSen", DataType = "REAL" },  // Ichimoku Cloud - Tenkan Sen
+                //new FieldDefinition { Name = "Ichimoku_KijunSen", DataType = "REAL" },  // Ichimoku Cloud - Kijun Sen
+                //new FieldDefinition { Name = "Ichimoku_SenkouSpanA", DataType = "REAL" },  // Ichimoku Cloud - Senkou Span A
+                //new FieldDefinition { Name = "Ichimoku_SenkouSpanB", DataType = "REAL" },  // Ichimoku Cloud - Senkou Span B
+                //new FieldDefinition { Name = "Ichimoku_ChikouSpan", DataType = "REAL" },  // Ichimoku Cloud - Chikou Span
                 new FieldDefinition { Name = "ParabolicSar", DataType = "REAL" },  // Parabolic SAR
                 new FieldDefinition { Name = "PivotPoint", DataType = "REAL" },  // Pivot Point
                 new FieldDefinition { Name = "Resistance1", DataType = "REAL" },  // Pivot Point - Resistance 1
@@ -113,7 +112,58 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "Lagged_StochD_1", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_2", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_StochD_3", DataType = "REAL" },
-                new FieldDefinition { Name = "FixedBuySignalRank", DataType = "INTEGER" } // Target field for ML prediction
+                
+                new FieldDefinition { Name = "PriceChangePercent", DataType = "REAL" },
+                new FieldDefinition { Name = "PricePositionInRange", DataType = "REAL" },
+                new FieldDefinition { Name = "VolumeChangePercent", DataType = "REAL" },
+                new FieldDefinition { Name = "RelativeVolume", DataType = "REAL" },
+                new FieldDefinition { Name = "VolumeProfile", DataType = "TEXT" },
+
+                new FieldDefinition { Name = "ATRPercent", DataType = "REAL" },
+                new FieldDefinition { Name = "RSIChange", DataType = "REAL" },
+                new FieldDefinition { Name = "MACDHistogramSlope", DataType = "REAL" },
+                new FieldDefinition { Name = "TrendStrength", DataType = "REAL" },
+                new FieldDefinition { Name = "TrendDuration", DataType = "INTEGER" },
+                new FieldDefinition { Name = "IsUptrend", DataType = "INTEGER" },
+
+                new FieldDefinition { Name = "DistanceToNearestSupport", DataType = "REAL" },
+                new FieldDefinition { Name = "DistanceToNearestResistance", DataType = "REAL" },
+                new FieldDefinition { Name = "DayOfWeek", DataType = "INTEGER" },
+                new FieldDefinition { Name = "ADLChange", DataType = "REAL" },
+                new FieldDefinition { Name = "HistoricalVolatility", DataType = "REAL" },
+                new FieldDefinition { Name = "ROC_5", DataType = "REAL" },
+                new FieldDefinition { Name = "ROC_10", DataType = "REAL" },
+                new FieldDefinition { Name = "VWAP", DataType = "REAL" },
+                
+                new FieldDefinition { Name = "CompositeSentiment", DataType = "REAL" },
+                new FieldDefinition { Name = "SentimentCategory", DataType = "TEXT" },
+                new FieldDefinition { Name = "CompositeMomentum", DataType = "REAL" },
+                new FieldDefinition { Name = "MACDCrossover", DataType = "INTEGER" },
+                new FieldDefinition { Name = "EMACrossover", DataType = "INTEGER" },
+                new FieldDefinition { Name = "CycleDominantPeriod", DataType = "INTEGER" },
+                new FieldDefinition { Name = "CyclePhase", DataType = "REAL" },
+                new FieldDefinition { Name = "IsBullishCyclePhase", DataType = "INTEGER" },
+                new FieldDefinition { Name = "DynamicSupportLevel", DataType = "REAL" },
+                new FieldDefinition { Name = "DynamicResistanceLevel", DataType = "REAL" },
+                new FieldDefinition { Name = "DistanceToDynamicSupport", DataType = "REAL" },
+                new FieldDefinition { Name = "DistanceToDynamicResistance", DataType = "REAL" },
+                new FieldDefinition { Name = "FractalDimension", DataType = "REAL" },
+                new FieldDefinition { Name = "HurstExponent", DataType = "REAL" },
+                new FieldDefinition { Name = "MarketEfficiencyRatio", DataType = "REAL" },
+                new FieldDefinition { Name = "MarketRegime", DataType = "TEXT" },
+                new FieldDefinition { Name = "MarketVolatility", DataType = "REAL" },
+                new FieldDefinition { Name = "OrderFlowImbalance", DataType = "REAL" },
+                new FieldDefinition { Name = "RSIDivergence", DataType = "INTEGER" },
+                new FieldDefinition { Name = "MACDDivergence", DataType = "INTEGER" },
+                new FieldDefinition { Name = "PriceActionPattern", DataType = "TEXT" },
+                new FieldDefinition { Name = "RSIDivergenceStrength", DataType = "REAL" },
+                new FieldDefinition { Name = "VolatilityRegime", DataType = "TEXT" },
+
+                new FieldDefinition { Name = "CandlePattern", DataType = "TEXT" },
+                new FieldDefinition { Name = "CandlePatternRank", DataType = "INTEGER" },
+                new FieldDefinition { Name = "CandlePatternMatchCount", DataType = "INTEGER" },
+
+                new FieldDefinition { Name = "BuySignal", DataType = "INTEGER" } // Target field for ML prediction
             };
 
             // Define the mappings between CSV columns and database fields
