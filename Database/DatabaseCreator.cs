@@ -43,6 +43,7 @@ namespace CryptoCandleMetricsProcessor.Database
                     CREATE INDEX IF NOT EXISTS idx_{tableName}_Granularity ON [{tableName}] (Granularity);
                     CREATE INDEX IF NOT EXISTS idx_{tableName}_StartDate ON [{tableName}] (StartDate);
                     CREATE INDEX IF NOT EXISTS idx_{tableName}_StartUnix ON [{tableName}] (StartUnix);
+                    ANALYZE;
                 ";
 
                 // Execute the create indexes query

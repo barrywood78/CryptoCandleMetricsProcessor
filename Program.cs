@@ -184,6 +184,12 @@ namespace CryptoCandleMetricsProcessor
             string dbFilePath = "candles_data.sqlite";
             string tableName = "Candles";
 
+            // Delete the database file if it already exists
+            if (File.Exists(dbFilePath))
+            {
+                File.Delete(dbFilePath);
+            }
+
             // Create the database with the specified table and fields
             DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
 

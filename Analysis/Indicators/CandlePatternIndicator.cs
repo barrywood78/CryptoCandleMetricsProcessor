@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Globalization;
+using System.Linq;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using TicTacTec.TA.Library;
 using Skender.Stock.Indicators;
@@ -43,6 +44,9 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             float[] low = candles.Select(c => (float)c.Low).ToArray();
             float[] close = candles.Select(c => (float)c.Close).ToArray();
 
+            var updateCommands = new StringBuilder();
+            int batchSize = 1000;
+
             for (int i = 0; i < candles.Count; i++)
             {
                 string bestPattern = "NO_PATTERN";
@@ -67,54 +71,53 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
                 string updateQuery = $@"
                 UPDATE {tableName}
-                SET CandlePattern = @CandlePattern,
-                    CandlePatternRank = @PatternRank,
-                    CandlePatternMatchCount = @MatchCount
-                WHERE ProductId = @ProductId
-                  AND Granularity = @Granularity
-                  AND StartDate = @StartDate";
+                SET CandlePattern = '{bestPattern}',
+                    CandlePatternRank = {(bestPattern == "NO_PATTERN" ? "NULL" : bestRank.ToString())},
+                    CandlePatternMatchCount = {matchCount}
+                WHERE ProductId = '{productId}'
+                  AND Granularity = '{granularity}'
+                  AND StartDate = '{candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}';";
 
-                using (var command = new SqliteCommand(updateQuery, connection, transaction))
+                updateCommands.AppendLine(updateQuery);
+
+                // Execute batch update every 1000 rows
+                if ((i + 1) % batchSize == 0 || i == candles.Count - 1)
                 {
-                    command.Parameters.AddWithValue("@CandlePattern", bestPattern);
-                    command.Parameters.AddWithValue("@PatternRank", bestPattern == "NO_PATTERN" ? DBNull.Value : bestRank);
-                    command.Parameters.AddWithValue("@MatchCount", matchCount);
-                    command.Parameters.AddWithValue("@ProductId", productId);
-                    command.Parameters.AddWithValue("@Granularity", granularity);
-                    command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-                    command.ExecuteNonQuery();
+                    using (var command = new SqliteCommand(updateCommands.ToString(), connection, transaction))
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                    updateCommands.Clear();
+                    Console.WriteLine($"CandlePatternIndicator - Processed {i + 1}/{candles.Count} rows.");
                 }
             }
         }
 
         private static CandlePatternFunction GetPatternRecognition(string pattern)
         {
-            switch (pattern)
+            return pattern switch
             {
-                case "CDL3LINESTRIKE": return Core.Cdl3LineStrike;
-                case "CDLINVERTEDHAMMER": return Core.CdlInvertedHammer;
-                case "CDLMATCHINGLOW": return Core.CdlMatchingLow;
-                case "CDLABANDONEDBABY":
-                    return (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
-                        => Core.CdlAbandonedBaby(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger);
-                case "CDLBREAKAWAY": return Core.CdlBreakaway;
-                case "CDLMORNINGSTAR":
-                    return (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
-                        => Core.CdlMorningStar(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger);
-                case "CDLPIERCING": return Core.CdlPiercing;
-                case "CDLSTICKSANDWHICH": return Core.CdlStickSandwhich;
-                case "CDLTHRUSTING": return Core.CdlThrusting;
-                case "CDLINNECK": return Core.CdlInNeck;
-                case "CDL3INSIDE": return Core.Cdl3Inside;
-                case "CDLHOMINGPIGEON": return Core.CdlHomingPigeon;
-                case "CDLMORNINGDOJISTAR":
-                    return (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
-                        => Core.CdlMorningDojiStar(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger);
-                case "CDLBELTHOLD": return Core.CdlBeltHold;
-                case "CDLHAMMER": return Core.CdlHammer;
-                case "CDLENGULFING": return Core.CdlEngulfing;
-                default: throw new ArgumentException($"Pattern {pattern} not supported.");
-            }
+                "CDL3LINESTRIKE" => Core.Cdl3LineStrike,
+                "CDLINVERTEDHAMMER" => Core.CdlInvertedHammer,
+                "CDLMATCHINGLOW" => Core.CdlMatchingLow,
+                "CDLABANDONEDBABY" => (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
+                    => Core.CdlAbandonedBaby(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger),
+                "CDLBREAKAWAY" => Core.CdlBreakaway,
+                "CDLMORNINGSTAR" => (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
+                    => Core.CdlMorningStar(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger),
+                "CDLPIERCING" => Core.CdlPiercing,
+                "CDLSTICKSANDWHICH" => Core.CdlStickSandwhich,
+                "CDLTHRUSTING" => Core.CdlThrusting,
+                "CDLINNECK" => Core.CdlInNeck,
+                "CDL3INSIDE" => Core.Cdl3Inside,
+                "CDLHOMINGPIGEON" => Core.CdlHomingPigeon,
+                "CDLMORNINGDOJISTAR" => (int startIdx, int endIdx, float[] open, float[] high, float[] low, float[] close, out int outBegIdx, out int outNbElement, int[] outInteger)
+                    => Core.CdlMorningDojiStar(startIdx, endIdx, open, high, low, close, 0.3f, out outBegIdx, out outNbElement, outInteger),
+                "CDLBELTHOLD" => Core.CdlBeltHold,
+                "CDLHAMMER" => Core.CdlHammer,
+                "CDLENGULFING" => Core.CdlEngulfing,
+                _ => throw new ArgumentException($"Pattern {pattern} not supported."),
+            };
         }
     }
 }
