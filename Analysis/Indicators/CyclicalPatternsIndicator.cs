@@ -34,7 +34,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
                         // Simplified dominant period calculation
                         dominantPeriod = FindSimpleDominantPeriod(cycleData);
-                        Console.WriteLine($"Calculated Dominant period: {dominantPeriod}");
+                        //Console.WriteLine($"Calculated Dominant period: {dominantPeriod}");
 
                         if (dominantPeriod.HasValue && dominantPeriod.Value != 0)
                         {
@@ -104,7 +104,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                 //Console.WriteLine($"CyclicalPatternsIndicator calculation completed. Total candles processed: {candles.Count}");
                 //Console.WriteLine($"Total rows updated in database: {updatedRows}");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 //Console.WriteLine($"Error in CyclicalPatternsIndicator: {ex.Message}");
                 //Console.WriteLine($"Stack Trace: {ex.StackTrace}");
