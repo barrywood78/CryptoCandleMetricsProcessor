@@ -84,7 +84,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                 // Log progress for every 1000 rows processed
                 if ((i + 1) % batchSize == 0 || i == candles.Count - 1)
                 {
-                    Console.WriteLine($"CandlePatternIndicator - Processed {i + 1}/{candles.Count} rows.");
+                    Console.WriteLine($"{productId} - {granularity}: CandlePatternIndicator - Processed {i + 1}/{candles.Count} rows.");
                 }
             });
 

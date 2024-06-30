@@ -143,9 +143,11 @@ namespace CryptoCandleMetricsProcessor
                 new FieldDefinition { Name = "CompositeMomentum", DataType = "REAL" },
                 new FieldDefinition { Name = "MACDCrossover", DataType = "INTEGER" },
                 new FieldDefinition { Name = "EMACrossover", DataType = "INTEGER" },
+
                 new FieldDefinition { Name = "CycleDominantPeriod", DataType = "INTEGER" },
                 new FieldDefinition { Name = "CyclePhase", DataType = "REAL" },
                 new FieldDefinition { Name = "IsBullishCyclePhase", DataType = "INTEGER" },
+                
                 new FieldDefinition { Name = "DynamicSupportLevel", DataType = "REAL" },
                 new FieldDefinition { Name = "DynamicResistanceLevel", DataType = "REAL" },
                 new FieldDefinition { Name = "DistanceToDynamicSupport", DataType = "REAL" },

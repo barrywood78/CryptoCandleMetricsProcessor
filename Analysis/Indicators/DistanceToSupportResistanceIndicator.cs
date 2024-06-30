@@ -13,8 +13,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             for (int i = 0; i < candles.Count; i++)
             {
                 // Retrieve support and resistance levels from the database
-                decimal support1 = GetSupportResistanceLevel(connection, tableName, productId, granularity, candles[i].Date, "Support1");
-                decimal resistance1 = GetSupportResistanceLevel(connection, tableName, productId, granularity, candles[i].Date, "Resistance1");
+                decimal support1 = GetSupportResistanceLevel(connection, transaction, tableName, productId, granularity, candles[i].Date, "Support1");
+                decimal resistance1 = GetSupportResistanceLevel(connection, transaction, tableName, productId, granularity, candles[i].Date, "Resistance1");
 
                 decimal closePrice = candles[i].Close;
                 decimal distanceToNearestSupport = (closePrice - support1) / closePrice;
@@ -40,7 +40,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             }
         }
 
-        private static decimal GetSupportResistanceLevel(SqliteConnection connection, string tableName, string productId, string granularity, DateTime date, string columnName)
+        private static decimal GetSupportResistanceLevel(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, DateTime date, string columnName)
         {
             string query = $@"
                 SELECT {columnName}
@@ -49,14 +49,13 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                   AND Granularity = @Granularity
                   AND StartDate = @StartDate";
 
-            using (var command = new SqliteCommand(query, connection))
+            using (var command = new SqliteCommand(query, connection, transaction))
             {
                 command.Parameters.AddWithValue("@ProductId", productId);
                 command.Parameters.AddWithValue("@Granularity", granularity);
                 command.Parameters.AddWithValue("@StartDate", date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
                 var result = command.ExecuteScalar();
-                return result != null ? Convert.ToDecimal(result) : 0;
+                return result != null && result != DBNull.Value ? Convert.ToDecimal(result) : 0;
             }
         }
     }
