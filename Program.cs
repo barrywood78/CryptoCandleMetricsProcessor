@@ -15,6 +15,9 @@ namespace CryptoCandleMetricsProcessor
     {
         static void Main(string[] args)
         {
+            DateTime startTime = DateTime.Now;
+            Console.WriteLine($"Application started at: {startTime}");
+
             // Path to the folder containing CSV files
             string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
 
@@ -210,6 +213,16 @@ namespace CryptoCandleMetricsProcessor
             // Export the database to CSV
             CsvExporter.ExportDatabaseToCsv(dbFilePath);
             Console.WriteLine("CSV data exported successfully.");
+
+
+
+            var endTime = DateTime.Now;
+            Console.WriteLine($"Application completed at: {endTime}");
+
+            // Calculate the duration
+            var duration = endTime - startTime;
+            Console.WriteLine($"Total time taken: {duration.Hours} hours, {duration.Minutes} minutes, {duration.Seconds} seconds");
+
         }
     }
 }
