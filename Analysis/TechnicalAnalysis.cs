@@ -90,7 +90,6 @@ namespace CryptoCandleMetricsProcessor.Analysis
                         {"LaggedFeatures", (conn, trans, table, prod, gran, c, p) => LaggedFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)},
                         {"ADLChange", (conn, trans, table, prod, gran, c, p) => ADLChangeIndicator.Calculate(conn, trans, table, prod, gran, c)},
                         {"ATRPercent", (conn, trans, table, prod, gran, c, p) => ATRPercentIndicator.Calculate(conn, trans, table, prod, gran, c, p["ATR"])},
-                        {"CandlePattern", (conn, trans, table, prod, gran, c, p) => CandlePatternIndicator.Calculate(conn, trans, table, prod, gran, c)},
                         {"CompositeMarketSentiment", (conn, trans, table, prod, gran, c, p) => CompositeMarketSentimentIndicator.Calculate(conn, trans, table, prod, gran, c)},
                         {"CompositeMomentum", (conn, trans, table, prod, gran, c, p) => CompositeMomentumIndicator.Calculate(conn, trans, table, prod, gran, c)},
                         {"CrossoverFeatures", (conn, trans, table, prod, gran, c, p) => CrossoverFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)},
@@ -116,7 +115,7 @@ namespace CryptoCandleMetricsProcessor.Analysis
                         {"TrendStrength", (conn, trans, table, prod, gran, c, p) => TrendStrengthIndicator.Calculate(conn, trans, table, prod, gran, c, p["ADXPeriod"], p["SMAPeriod"])},
                         {"VolatilityRegime", (conn, trans, table, prod, gran, c, p) => VolatilityRegime.Calculate(conn, trans, table, prod, gran, c, p["Period"])},
                         {"VolumeChangePercent", (conn, trans, table, prod, gran, c, p) => VolumeChangePercentIndicator.Calculate(conn, trans, table, prod, gran, c)},
-                        {"VWAP", (conn, trans, table, prod, gran, c, p) => VWAPIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                        {"VWAP", (conn, trans, table, prod, gran, c, p) => VWAPIndicator.Calculate(conn, trans, table, prod, gran, c)}
                     };
 
                     // If you have any specific parameters to be passed to the indicators, ensure to add them to the GetPeriodsForGranularity method and pass accordingly.
@@ -148,6 +147,30 @@ namespace CryptoCandleMetricsProcessor.Analysis
                         }
                     }
                 }
+
+                // Calculate CandlePatternIndicator separately with its own transaction
+                foreach (var group in groupedCandles)
+                {
+                    var productId = group.Key.ProductId;
+                    var granularity = group.Key.Granularity;
+                    var candles = group.Value;
+
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            CandlePatternIndicator.Calculate(connection, transaction, tableName, productId, granularity, candles);
+                            transaction.Commit();
+                            Console.WriteLine($"CandlePattern calculated for {productId} - {granularity}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error calculating CandlePattern for {productId} - {granularity}: {ex.Message}");
+                            transaction.Rollback();
+                        }
+                    }
+                }
+
 
                 // Create indexes and run ANALYZE
                 CreateIndexesAndAnalyze(dbFilePath, tableName);

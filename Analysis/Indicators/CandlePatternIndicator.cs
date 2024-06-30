@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using TicTacTec.TA.Library;
 using Skender.Stock.Indicators;
@@ -11,7 +13,6 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class CandlePatternIndicator
     {
-        // Custom delegate to match TA-Lib function signatures
         private delegate Core.RetCode CandlePatternFunction(int startIdx, int endIdx, float[] inOpen, float[] inHigh, float[] inLow, float[] inClose, out int outBegIdx, out int outNbElement, int[] outInteger);
 
         private static readonly Dictionary<string, int> BuyPatternRankings = new Dictionary<string, int>
@@ -44,10 +45,10 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             float[] low = candles.Select(c => (float)c.Low).ToArray();
             float[] close = candles.Select(c => (float)c.Close).ToArray();
 
-            var updateCommands = new StringBuilder();
+            var updateCommands = new ConcurrentBag<string>();
             int batchSize = 1000;
 
-            for (int i = 0; i < candles.Count; i++)
+            Parallel.For(0, candles.Count, i =>
             {
                 string bestPattern = "NO_PATTERN";
                 int bestRank = int.MaxValue;
@@ -78,18 +79,19 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                   AND Granularity = '{granularity}'
                   AND StartDate = '{candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}';";
 
-                updateCommands.AppendLine(updateQuery);
+                updateCommands.Add(updateQuery);
 
-                // Execute batch update every 1000 rows
+                // Log progress for every 1000 rows processed
                 if ((i + 1) % batchSize == 0 || i == candles.Count - 1)
                 {
-                    using (var command = new SqliteCommand(updateCommands.ToString(), connection, transaction))
-                    {
-                        command.ExecuteNonQuery();
-                    }
-                    updateCommands.Clear();
                     Console.WriteLine($"CandlePatternIndicator - Processed {i + 1}/{candles.Count} rows.");
                 }
+            });
+
+            // Execute batch update
+            using (var command = new SqliteCommand(string.Join("\n", updateCommands), connection, transaction))
+            {
+                command.ExecuteNonQuery();
             }
         }
 
