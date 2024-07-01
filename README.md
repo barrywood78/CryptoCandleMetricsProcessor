@@ -26,7 +26,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The ADLChangeIndicator calculates the change in the Accumulation/Distribution Line (ADL) between periods. It measures the net accumulation or distribution of a security over a specified time frame.
 
 **Calculation:**
-- **ADL Change:** \( \text{ADL Change} = \text{Current ADL} - \text{Previous ADL} \)
+- **ADL Change:** ADL Change = Current ADL - Previous ADL
 
 **Database Fields Updated:**
 - **ADLChange:** The change in the ADL value between the current and previous periods.
@@ -35,7 +35,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The AdLineIndicator calculates the Accumulation/Distribution Line (ADL), which combines price and volume to indicate the flow of money into or out of a security.
 
 **Calculation:**
-- **ADL:** \( \text{ADL} = \sum \left( \frac{(\text{Close} - \text{Low}) - (\text{High} - \text{Close})}{\text{High} - \text{Low}} \times \text{Volume} \right) \)
+- **ADL:** ADL = Sum((Close - Low) - (High - Close)) / (High - Low) * Volume)
 
 **Database Fields Updated:**
 - **ADL:** The Accumulation/Distribution Line value for each period.
@@ -62,7 +62,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The ATRPercentIndicator calculates the ATR as a percentage of the closing price. It normalizes the ATR value for better comparison across different securities.
 
 **Calculation:**
-- **ATR Percent:** \( \text{ATR Percent} = \frac{\text{ATR}}{\text{Close}} \)
+- **ATR Percent:** ATR Percent = ATR / Close
 
 **Database Fields Updated:**
 - **ATRPercent:** The ATR value as a percentage of the closing price for each period.
@@ -72,11 +72,11 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Middle Band (SMA):** The simple moving average over a specified period.
-- **Upper Band:** \( \text{SMA} + ( \text{Standard Deviation} \times \text{Multiplier}) \)
-- **Lower Band:** \( \text{SMA} - ( \text{Standard Deviation} \times \text{Multiplier}) \)
-- **Percent B:** \( \frac{\text{Close} - \text{Lower Band}}{\text{Upper Band} - \text{Lower Band}} \)
-- **Z-Score:** \( \frac{\text{Close} - \text{SMA}}{\text{Standard Deviation}} \)
-- **Band Width:** \( \frac{\text{Upper Band} - \text{Lower Band}}{\text{SMA}} \)
+- **Upper Band:** SMA + (Standard Deviation * Multiplier)
+- **Lower Band:** SMA - (Standard Deviation * Multiplier)
+- **Percent B:** (Close - Lower Band) / (Upper Band - Lower Band)
+- **Z-Score:** (Close - SMA) / Standard Deviation
+- **Band Width:** (Upper Band - Lower Band) / SMA
 
 **Database Fields Updated:**
 - **BB_SMA:** The simple moving average (middle band).
@@ -115,7 +115,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The CciIndicator calculates the Commodity Channel Index (CCI), which is used to identify cyclical trends in a security.
 
 **Calculation:**
-- **CCI:** \( \text{CCI} = \frac{(\text{Typical Price} - \text{SMA})}{0.015 \times \text{Mean Deviation}} \)
+- **CCI:** CCI = (Typical Price - SMA) / (0.015 * Mean Deviation)
 
 **Database Fields Updated:**
 - **CCI:** The Commodity Channel Index value for each period.
@@ -186,8 +186,8 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The DistanceToSupportResistanceIndicator calculates the distance to the nearest support and resistance levels.
 
 **Calculation:**
-- **Distance to Nearest Support:** \( \text{DistanceToNearestSupport} = \frac{\text{Close} - \text{Support1}}{\text{Close}} \)
-- **Distance to Nearest Resistance:** \( \text{DistanceToNearestResistance} = \frac{\text{Resistance1} - \text{Close}}{\text{Close}} \)
+- **Distance to Nearest Support:** DistanceToNearestSupport = (Close - Support1) / Close
+- **Distance to Nearest Resistance:** DistanceToNearestResistance = (Resistance1 - Close) / Close
 
 **Database Fields Updated:**
 - **DistanceToNearestSupport:** The distance to the nearest support level.
@@ -199,8 +199,8 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Calculation:**
 - **Support Level:** The minimum low value from recent candles.
 - **Resistance Level:** The maximum high value from recent candles.
-- **Distance to Dynamic Support:** \( \text{DistanceToDynamicSupport} = \frac{\text{Close} - \text{SupportLevel}}{\text{Close}} \)
-- **Distance to Dynamic Resistance:** \( \text{DistanceToDynamicResistance} = \frac{\text{ResistanceLevel} - \text{Close}}{\text{Close}} \)
+- **Distance to Dynamic Support:** DistanceToDynamicSupport = (Close - SupportLevel) / Close
+- **Distance to Dynamic Resistance:** DistanceToDynamicResistance = (ResistanceLevel - Close) / Close
 
 **Database Fields Updated:**
 - **DynamicSupportLevel:** The dynamic support level.
@@ -245,15 +245,9 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Historical Volatility:** 
-  \[
-  \text{Returns} = \ln\left(\frac{\text{Close}_t}{\text{Close}_{t-1}}\right)
-  \]
-  \[
-  \text{Standard Deviation} = \sqrt{\frac{\sum (\text{Returns} - \text{Mean Return})^2}{\text{Period} - 1}}
-  \]
-  \[
-  \text{Annualized Volatility} = \text{Standard Deviation} \times \sqrt{252}
-  \]
+  Returns = ln(Close_t / Close_t-1)
+  Standard Deviation = sqrt(Sum((Returns - Mean Return)^2) / (Period - 1))
+  Annualized Volatility = Standard Deviation * sqrt(252)
 
 **Database Fields Updated:**
 - **HistoricalVolatility:** The annualized historical volatility value.
@@ -263,9 +257,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Hurst Exponent:** 
-  \[
-  \text{R/S Analysis}
-  \]
+  R/S Analysis
   Perform regression on the log of R/S values against the log of lags to find the slope, which is the Hurst exponent.
 
 **Database Fields Updated:**
@@ -276,25 +268,15 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Tenkan-sen (Conversion Line):**
-  \[
-  \text{Tenkan-sen} = \frac{\text{Highest High} + \text{Lowest Low}}{2} \text{ (over the last 9 periods)}
-  \]
+  Tenkan-sen = (Highest High + Lowest Low) / 2 (over the last 9 periods)
 - **Kijun-sen (Base Line):**
-  \[
-  \text{Kijun-sen} = \frac{\text{Highest High} + \text{Lowest Low}}{2} \text{ (over the last 26 periods)}
-  \]
+  Kijun-sen = (Highest High + Lowest Low) / 2 (over the last 26 periods)
 - **Senkou Span A (Leading Span A):**
-  \[
-  \text{Senkou Span A} = \frac{\text{Tenkan-sen} + \text{Kijun-sen}}{2} \text{ (plotted 26 periods ahead)}
-  \]
+  Senkou Span A = (Tenkan-sen + Kijun-sen) / 2 (plotted 26 periods ahead)
 - **Senkou Span B (Leading Span B):**
-  \[
-  \text{Senkou Span B} = \frac{\text{Highest High} + \text{Lowest Low}}{2} \text{ (over the last 52 periods, plotted 26 periods ahead)}
-  \]
+  Senkou Span B = (Highest High + Lowest Low) / 2 (over the last 52 periods, plotted 26 periods ahead)
 - **Chikou Span (Lagging Span):**
-  \[
-  \text{Chikou Span} = \text{Close price plotted 26 periods back}
-  \]
+  Chikou Span = Close price plotted 26 periods back
 
 **Database Fields Updated:**
 - **Ichimoku_TenkanSen:** The Tenkan-sen value.
@@ -308,34 +290,16 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Lagged Closing Prices:**
-  \[
-  \text{LaggedClose}_n = \text{Close Price of } (t-n)
-  \]
+  LaggedClose_n = Close Price of (t-n)
 - **Lagged RSI, EMA, ATR, MACD, Bollinger Bands, Stochastic Oscillator:**
-  \[
-  \text{LaggedRSI}_n = \text{RSI of } (t-n)
-  \]
-  \[
-  \text{LaggedEMA}_n = \text{EMA of } (t-n)
-  \]
-  \[
-  \text{LaggedATR}_n = \text{ATR of } (t-n)
-  \]
-  \[
-  \text{LaggedMACD}_n = \text{MACD of } (t-n)
-  \]
-  \[
-  \text{LaggedBollingerUpper}_n = \text{Upper Band of } (t-n)
-  \]
-  \[
-  \text{LaggedBollingerLower}_n = \text{Lower Band of } (t-n)
-  \]
-  \[
-  \text{LaggedStochK}_n = \text{Stochastic %K of } (t-n)
-  \]
-  \[
-  \text{LaggedStochD}_n = \text{Stochastic %D of } (t-n)
-  \]
+  LaggedRSI_n = RSI of (t-n)
+  LaggedEMA_n = EMA of (t-n)
+  LaggedATR_n = ATR of (t-n)
+  LaggedMACD_n = MACD of (t-n)
+  LaggedBollingerUpper_n = Upper Band of (t-n)
+  LaggedBollingerLower_n = Lower Band of (t-n)
+  LaggedStochK_n = Stochastic %K of (t-n)
+  LaggedStochD_n = Stochastic %D of (t-n)
 
 **Database Fields Updated:**
 - **Lagged_Close_1, Lagged_Close_2, Lagged_Close_3:** Lagged close prices for 1, 2, and 3 periods back.
@@ -350,15 +314,12 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 - **Lagged_StochK_1, Lagged_StochK_2, Lagged_StochK_3:** Lagged Stochastic %K values for 1, 2, and 3 periods back.
 - **Lagged_StochD_1, Lagged_StochD_2, Lagged_StochD_3:** Lagged Stochastic %D values for 1, 2, and 3 periods back.
 
-
 ### 25. MACD Histogram Slope Indicator (MACDHistogramSlopeIndicator)
 **Description:** The MACDHistogramSlopeIndicator calculates the slope of the MACD histogram between consecutive periods. It helps to identify changes in the momentum of the price movements.
 
 **Calculation:**
 - **MACD Histogram Slope:** 
-  \[
-  \text{MACD Histogram Slope} = \text{Current MACD Histogram} - \text{Previous MACD Histogram}
-  \]
+  MACD Histogram Slope = Current MACD Histogram - Previous MACD Histogram
 
 **Database Fields Updated:**
 - **MACDHistogramSlope:** The slope of the MACD histogram between consecutive periods.
@@ -381,9 +342,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **MER:** 
-  \[
-  \text{MER} = \frac{\text{Net Price Change}}{\sum \text{Price Changes}}
-  \]
+  MER = Net Price Change / Sum(Price Changes)
 
 **Database Fields Updated:**
 - **MarketEfficiencyRatio:** The Market Efficiency Ratio value for each period.
@@ -393,9 +352,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Volatility:** 
-  \[
-  \text{Volatility} = \frac{\text{ATR}}{\text{SMA}}
-  \]
+  Volatility = ATR / SMA
 - **Market Regime:** Determined based on volatility and price position relative to the SMA.
 
 **Database Fields Updated:**
@@ -407,14 +364,10 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **OBV:** 
-  \[
-  \text{OBV} = \text{Previous OBV} + 
-  \begin{cases} 
-  \text{Volume}, & \text{if Close} > \text{Previous Close} \\
-  -\text{Volume}, & \text{if Close} < \text{Previous Close} \\
-  0, & \text{if Close} = \text{Previous Close} 
-  \end{cases}
-  \]
+  OBV = Previous OBV + 
+    Volume, if Close > Previous Close
+    -Volume, if Close < Previous Close
+    0, if Close = Previous Close 
 
 **Database Fields Updated:**
 - **OBV:** The On-Balance Volume value for each period.
@@ -424,9 +377,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Order Flow Imbalance:** 
-  \[
-  \text{Order Flow Imbalance} = \frac{\text{Buying Pressure} - \text{Selling Pressure}}{\text{Buying Pressure} + \text{Selling Pressure}}
-  \]
+  Order Flow Imbalance = (Buying Pressure - Selling Pressure) / (Buying Pressure + Selling Pressure)
 
 **Database Fields Updated:**
 - **OrderFlowImbalance:** The order flow imbalance value for each period.
@@ -441,7 +392,6 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Database Fields Updated:**
 - **RSIDivergence:** Binary indicator for RSI divergence.
 - **MACDDivergence:** Binary indicator for MACD divergence.
-
 
 ### 32. Parabolic SAR Indicator (ParabolicSarIndicator)
 **Description:** The ParabolicSarIndicator calculates the Parabolic SAR (Stop and Reverse) indicator, which is used to determine the direction of an asset's momentum and the point in time when this momentum has a higher-than-normal probability of switching directions.
@@ -466,9 +416,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Price Change Percent:** 
-  \[
-  \text{Price Change Percent} = \frac{\text{Close} - \text{Open}}{\text{Open}}
-  \]
+  Price Change Percent = (Close - Open) / Open
 
 **Database Fields Updated:**
 - **PriceChangePercent:** The percentage change in price for each period.
@@ -478,9 +426,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Price Position in Range:** 
-  \[
-  \text{Price Position in Range} = \frac{\text{Close} - \text{Low}}{\text{High} - \text{Low}}
-  \]
+  Price Position in Range = (Close - Low) / (High - Low)
 
 **Database Fields Updated:**
 - **PricePositionInRange:** The position of the close price within the high-low range.
@@ -503,15 +449,12 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Database Fields Updated:**
 - **PriceUpStreak:** The streak count of consecutive periods with a price increase.
 
-
 ### 38. Relative Volume Profile (RelativeVolumeProfile)
 **Description:** The RelativeVolumeProfile calculates the relative volume compared to a rolling average and standard deviation over a specified lookback period. It also classifies the volume into categories such as Extremely High, High, Normal, Low, and Extremely Low.
 
 **Calculation:**
 - **Relative Volume:** 
-  \[
-  \text{Relative Volume} = \frac{\text{Current Volume} - \text{Average Volume}}{\text{Standard Deviation of Volume}}
-  \]
+  Relative Volume = (Current Volume - Average Volume) / Standard Deviation of Volume
 - **Volume Profile:** Classification based on the relative volume.
 
 **Database Fields Updated:**
@@ -523,9 +466,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **ROC:** 
-  \[
-  \text{ROC}_n = \frac{\text{Close} - \text{Close}_{n}}{\text{Close}_{n}}
-  \]
+  ROC_n = (Close - Close_n) / Close_n
 
 **Database Fields Updated:**
 - **ROC_5:** The ROC value for a 5-period lookback.
@@ -547,9 +488,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **RSI Change:** 
-  \[
-  \text{RSI Change} = \text{Current RSI} - \text{Previous RSI}
-  \]
+  RSI Change = Current RSI - Previous RSI
 
 **Database Fields Updated:**
 - **RSIChange:** The change in RSI value between the current and previous periods.
@@ -559,9 +498,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **RSI Divergence Strength:** 
-  \[
-  \text{Divergence Strength} = \left| \text{Price Change} - \text{RSI Change} \right| \quad \text{if signs differ}
-  \]
+  Divergence Strength = |Price Change - RSI Change| if signs differ
 
 **Database Fields Updated:**
 - **RSIDivergenceStrength:** The strength of the RSI divergence.
@@ -574,7 +511,6 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Database Fields Updated:**
 - **RSI:** The Relative Strength Index value for each period.
-
 
 ### 44. Simple Moving Average (SMA) Indicator (SmaIndicator)
 **Description:** The SmaIndicator calculates the Simple Moving Average (SMA) for a specified period.
@@ -590,25 +526,15 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **Rolling Mean:** 
-  \[
-  \text{Rolling Mean} = \text{Average of Close Prices over the Period}
-  \]
+  Rolling Mean = Average of Close Prices over the Period
 - **Rolling Standard Deviation:** 
-  \[
-  \text{Rolling Std Dev} = \sqrt{\text{Variance of Close Prices over the Period}}
-  \]
+  Rolling Std Dev = sqrt(Variance of Close Prices over the Period)
 - **Rolling Variance:** 
-  \[
-  \text{Rolling Variance} = \text{Variance of Close Prices over the Period}
-  \]
+  Rolling Variance = Variance of Close Prices over the Period
 - **Rolling Skewness:** 
-  \[
-  \text{Rolling Skewness} = \text{Skewness of Close Prices over the Period}
-  \]
+  Rolling Skewness = Skewness of Close Prices over the Period
 - **Rolling Kurtosis:** 
-  \[
-  \text{Rolling Kurtosis} = \text{Kurtosis of Close Prices over the Period}
-  \]
+  Rolling Kurtosis = Kurtosis of Close Prices over the Period
 
 **Database Fields Updated:**
 - **RollingMean:** The rolling mean value.
@@ -622,12 +548,8 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Calculation:**
 - **%K and %D:**
-  \[
-  \text{Stoch}_K = \frac{\text{Current Close} - \text{Lowest Low}}{\text{Highest High} - \text{Lowest Low}} \times 100
-  \]
-  \[
-  \text{Stoch}_D = \text{SMA of } \text{Stoch}_K
-  \]
+  Stoch_K = (Current Close - Lowest Low) / (Highest High - Lowest Low) * 100
+  Stoch_D = SMA of Stoch_K
 
 **Database Fields Updated:**
 - **Stoch_K:** The %K value of the Stochastic Oscillator.
@@ -651,14 +573,13 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Database Fields Updated:**
 - **TEMA:** The Triple Exponential Moving Average value for each period.
 
-
 ### 49. Trend Strength Indicator (TrendStrengthIndicator)
 **Description:** The TrendStrengthIndicator calculates the trend strength and duration using ADX and SMA values.
 
 **Calculation:**
 - **ADX Value:** The ADX value for trend strength.
 - **Price to SMA:** The ratio of the current price to the SMA value.
-- **Trend Strength:** \( \text{TrendStrength} = \text{ADX} \times (\text{Price to SMA} > 1 ? \text{Price to SMA} : 1 / \text{Price to SMA}) \)
+- **Trend Strength:** TrendStrength = ADX * (Price to SMA > 1 ? Price to SMA : 1 / Price to SMA)
 - **Trend Duration:** The duration of the current trend.
 - **Is Uptrend:** A boolean indicating if the trend is an uptrend.
 
@@ -682,7 +603,7 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 **Description:** The VolumeChangePercentIndicator calculates the percentage change in volume compared to the previous period.
 
 **Calculation:**
-- **Volume Change Percent:** \( \text{VolumeChangePercent} = \frac{\text{Current Volume} - \text{Previous Volume}}{\text{Previous Volume}} \)
+- **Volume Change Percent:** VolumeChangePercent = (Current Volume - Previous Volume) / Previous Volume
 
 **Database Fields Updated:**
 - **VolumeChangePercent:** The percentage change in volume for each period.
@@ -704,5 +625,3 @@ The Crypto Candle Metrics Processor includes a comprehensive set of technical in
 
 **Database Fields Updated:**
 - **WilliamsR:** The Williams %R value for each period.
-
-
