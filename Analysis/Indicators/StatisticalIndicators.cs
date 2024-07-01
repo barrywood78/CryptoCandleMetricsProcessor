@@ -1,148 +1,101 @@
-﻿using Skender.Stock.Indicators;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
-using Microsoft.Data.Sqlite;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using MathNet.Numerics.Statistics;
+using Skender.Stock.Indicators;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class StatisticalIndicators
     {
-        /// <summary>
-        /// Calculates various statistical indicators and updates the database.
-        /// </summary>
-        /// <param name="connection">The SQLite database connection.</param>
-        /// <param name="transaction">The SQLite transaction for atomic updates.</param>
-        /// <param name="tableName">The name of the table to update.</param>
-        /// <param name="productId">The product ID to filter the data.</param>
-        /// <param name="granularity">The granularity to filter the data.</param>
-        /// <param name="candles">The list of candle data to process.</param>
-        /// <param name="period">The period to use for the statistical calculations.</param>
+        private const int BatchSize = 5000;
+
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
         {
-            // Calculate Rolling Mean
-            CalculateRollingMean(connection, transaction, tableName, productId, granularity, candles, period);
+            var closePrices = candles.Select(c => (double)c.Close).ToArray();
+            var dates = candles.Select(c => c.Date).ToArray();
 
-            // Calculate Rolling Standard Deviation
-            CalculateRollingStdDev(connection, transaction, tableName, productId, granularity, candles, period);
+            var results = new Dictionary<DateTime, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)>();
 
-            // Calculate Rolling Variance
-            CalculateRollingVariance(connection, transaction, tableName, productId, granularity, candles, period);
-
-            // Calculate Rolling Skewness
-            CalculateRollingSkewness(connection, transaction, tableName, productId, granularity, candles, period);
-
-            // Calculate Rolling Kurtosis
-            CalculateRollingKurtosis(connection, transaction, tableName, productId, granularity, candles, period);
-        }
-
-        private static void CalculateRollingMean(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
-        {
-            // Calculate rolling means over the specified period
-            var rollingMeans = candles.Select((c, i) => new
+            Parallel.For(period - 1, closePrices.Length, i =>
             {
-                c.Date,
-                RollingMean = i >= period - 1 ? (decimal?)candles.Skip(i - period + 1).Take(period).Select(q => q.Close).Average() : null
-            }).ToList();
-
-            // Update the database with the rolling means
-            UpdateDatabase(connection, transaction, tableName, productId, granularity, rollingMeans, "RollingMean");
-        }
-
-        private static void CalculateRollingStdDev(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
-        {
-            // Calculate rolling standard deviations over the specified period
-            var rollingStdDevs = candles.Select((c, i) => new
-            {
-                c.Date,
-                RollingStdDev = i >= period - 1 ? (double?)candles.Skip(i - period + 1).Take(period).Select(q => (double)q.Close).StandardDeviation() : null
-            }).ToList();
-
-            // Update the database with the rolling standard deviations
-            UpdateDatabase(connection, transaction, tableName, productId, granularity, rollingStdDevs, "RollingStdDev");
-        }
-
-        private static void CalculateRollingVariance(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
-        {
-            // Calculate rolling variances over the specified period
-            var rollingVariances = candles.Select((c, i) => new
-            {
-                c.Date,
-                RollingVariance = i >= period - 1 ? (double?)candles.Skip(i - period + 1).Take(period).Select(q => (double)q.Close).Variance() : null
-            }).ToList();
-
-            // Update the database with the rolling variances
-            UpdateDatabase(connection, transaction, tableName, productId, granularity, rollingVariances, "RollingVariance");
-        }
-
-        private static void CalculateRollingSkewness(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
-        {
-            // Calculate rolling skewness over the specified period
-            var rollingSkewness = candles.Select((c, i) => new
-            {
-                c.Date,
-                RollingSkewness = i >= period - 1 ? (double?)candles.Skip(i - period + 1).Take(period).Select(q => (double)q.Close).Skewness() : null
-            }).ToList();
-
-            // Update the database with the rolling skewness
-            UpdateDatabase(connection, transaction, tableName, productId, granularity, rollingSkewness, "RollingSkewness");
-        }
-
-        private static void CalculateRollingKurtosis(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
-        {
-            // Calculate rolling kurtosis over the specified period
-            var rollingKurtosis = candles.Select((c, i) => new
-            {
-                c.Date,
-                RollingKurtosis = i >= period - 1 ? (double?)candles.Skip(i - period + 1).Take(period).Select(q => (double)q.Close).Kurtosis() : null
-            }).ToList();
-
-            // Update the database with the rolling kurtosis
-            UpdateDatabase(connection, transaction, tableName, productId, granularity, rollingKurtosis, "RollingKurtosis");
-        }
-
-        private static void UpdateDatabase<T>(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<T> results, string columnName)
-        {
-            // Iterate through the results and update the database
-            foreach (var result in results)
-            {
-                if (result != null)
+                var window = closePrices.AsSpan().Slice(i - period + 1, period);
+                var stats = CalculateStatistics(window);
+                lock (results)
                 {
-                    var resultType = result.GetType();
-                    var date = (DateTime?)resultType.GetProperty("Date")?.GetValue(result, null) ?? default(DateTime);
-                    var value = resultType.GetProperty(columnName)?.GetValue(result, null);
+                    results[dates[i]] = stats;
+                }
+            });
 
-                    if (value != null)
-                    {
-                        bool isNaN = false;
-                        if (value is double doubleValue)
-                        {
-                            isNaN = double.IsNaN(doubleValue);
-                        }
+            UpdateDatabase(connection, transaction, tableName, productId, granularity, results);
+        }
 
-                        if (!isNaN)
-                        {
-                            string updateQuery = $@"
-                                UPDATE {tableName}
-                                SET {columnName} = @{columnName}
-                                WHERE ProductId = @ProductId
-                                  AND Granularity = @Granularity
-                                  AND StartDate = @StartDate";
+        private static (double Mean, double StdDev, double Variance, double Skewness, double Kurtosis) CalculateStatistics(Span<double> data)
+        {
+            double sum = 0, sumSquared = 0, sumCubed = 0, sumFourth = 0;
+            for (int i = 0; i < data.Length; i++)
+            {
+                double x = data[i];
+                sum += x;
+                double x2 = x * x;
+                sumSquared += x2;
+                sumCubed += x2 * x;
+                sumFourth += x2 * x2;
+            }
 
-                            using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                            {
-                                // Add parameters to the update command
-                                command.Parameters.AddWithValue($"@{columnName}", value);
-                                command.Parameters.AddWithValue("@ProductId", productId);
-                                command.Parameters.AddWithValue("@Granularity", granularity);
-                                command.Parameters.AddWithValue("@StartDate", date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+            double mean = sum / data.Length;
+            double variance = (sumSquared - sum * sum / data.Length) / (data.Length - 1);
+            double stdDev = Math.Sqrt(variance);
 
-                                // Execute the update command
-                                command.ExecuteNonQuery();
-                            }
-                        }
-                    }
+            double m2 = sumSquared / data.Length - mean * mean;
+            double m3 = (sumCubed - 3 * mean * sumSquared + 2 * mean * mean * sum) / data.Length;
+            double m4 = (sumFourth - 4 * mean * sumCubed + 6 * mean * mean * sumSquared - 3 * mean * mean * mean * sum) / data.Length;
+
+            double skewness = m3 / (stdDev * stdDev * stdDev);
+            double kurtosis = m4 / (m2 * m2) - 3;
+
+            return (mean, stdDev, variance, skewness, kurtosis);
+        }
+
+        private static void UpdateDatabase(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, Dictionary<DateTime, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)> results)
+        {
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET RollingMean = @Mean,
+                    RollingStdDev = @StdDev,
+                    RollingVariance = @Variance,
+                    RollingSkewness = @Skewness,
+                    RollingKurtosis = @Kurtosis
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = @StartDate";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@Mean", SqliteType.Real);
+            command.Parameters.Add("@StdDev", SqliteType.Real);
+            command.Parameters.Add("@Variance", SqliteType.Real);
+            command.Parameters.Add("@Skewness", SqliteType.Real);
+            command.Parameters.Add("@Kurtosis", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Text);
+
+            foreach (var batch in results.Keys.Chunk(BatchSize))
+            {
+                foreach (var date in batch)
+                {
+                    var (mean, stdDev, variance, skewness, kurtosis) = results[date];
+                    command.Parameters["@Mean"].Value = mean.HasValue && !double.IsNaN(mean.Value) ? (object)mean.Value : DBNull.Value;
+                    command.Parameters["@StdDev"].Value = stdDev.HasValue && !double.IsNaN(stdDev.Value) ? (object)stdDev.Value : DBNull.Value;
+                    command.Parameters["@Variance"].Value = variance.HasValue && !double.IsNaN(variance.Value) ? (object)variance.Value : DBNull.Value;
+                    command.Parameters["@Skewness"].Value = skewness.HasValue && !double.IsNaN(skewness.Value) ? (object)skewness.Value : DBNull.Value;
+                    command.Parameters["@Kurtosis"].Value = kurtosis.HasValue && !double.IsNaN(kurtosis.Value) ? (object)kurtosis.Value : DBNull.Value;
+                    command.Parameters["@StartDate"].Value = date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+                    command.ExecuteNonQuery();
                 }
             }
         }

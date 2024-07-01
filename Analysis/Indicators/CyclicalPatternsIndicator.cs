@@ -1,9 +1,12 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Skender.Stock.Indicators;
+using System.Numerics;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
@@ -11,162 +14,166 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
     {
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles)
         {
-            //Console.WriteLine($"Starting CyclicalPatternsIndicator calculation for {productId} - {granularity}");
             int cyclePeriod = GetCyclePeriodForGranularity(granularity);
-            //Console.WriteLine($"Cycle period for {granularity}: {cyclePeriod}");
-            //Console.WriteLine($"Total candles: {candles.Count}");
+            var results = new ConcurrentDictionary<DateTime, (int? DominantPeriod, double? Phase, bool? IsBullishPhase)>();
 
-            try
+            // Pre-compute closing prices array
+            double[] closingPrices = candles.Select(c => (double)c.Close).ToArray();
+
+            // Parallel processing of candles with chunking
+            int chunkSize = Math.Max(1000, cyclePeriod);
+            Parallel.ForEach(Partitioner.Create(0, candles.Count, chunkSize), range =>
             {
-                int updatedRows = 0;
-                for (int i = 0; i < candles.Count; i++)
+                for (int i = range.Item1; i < range.Item2; i++)
                 {
-                    //Console.WriteLine($"Processing candle {i + 1} of {candles.Count}");
-                    int? dominantPeriod = null;
-                    double? phase = null;
-                    bool? isBullishPhase = null;
-
                     if (i >= cyclePeriod)
                     {
-                        var cycleData = candles.Skip(i - cyclePeriod).Take(cyclePeriod).Select(c => (double)c.Close).ToArray();
-                        //Console.WriteLine($"Cycle data points: {cycleData.Length}");
-                        //Console.WriteLine($"First price in cycle: {cycleData.First()}, Last price: {cycleData.Last()}");
+                        var cycleData = new Span<double>(closingPrices, i - cyclePeriod, cyclePeriod);
+                        int? dominantPeriod = FindSimpleDominantPeriod(cycleData);
 
-                        // Simplified dominant period calculation
-                        dominantPeriod = FindSimpleDominantPeriod(cycleData);
-                        //Console.WriteLine($"Calculated Dominant period: {dominantPeriod}");
+                        double? phase = null;
+                        bool? isBullishPhase = null;
 
                         if (dominantPeriod.HasValue && dominantPeriod.Value != 0)
                         {
                             phase = CalculatePhase(i % dominantPeriod.Value, dominantPeriod.Value);
-                            //Console.WriteLine($"Calculated Phase: {phase}");
+                            isBullishPhase = cycleData[^1] > cycleData.ToArray().Average();
+                        }
 
-                            isBullishPhase = cycleData.Last() > cycleData.Average();
-                            //Console.WriteLine($"Is Bullish Phase: {isBullishPhase}");
-                        }
-                        else
-                        {
-                            //Console.WriteLine("Warning: Invalid dominant period calculated. Setting values to null.");
-                        }
+                        results[candles[i].Date] = (dominantPeriod, phase, isBullishPhase);
                     }
                     else
                     {
-                        //Console.WriteLine($"Skipping full calculation for candle {i}, not enough data yet");
-                    }
-
-                    string updateQuery = $@"
-                    UPDATE {tableName}
-                    SET CycleDominantPeriod = @DominantPeriod,
-                        CyclePhase = @Phase,
-                        IsBullishCyclePhase = @IsBullishPhase
-                    WHERE ProductId = @ProductId
-                      AND Granularity = @Granularity
-                      AND StartDate = @StartDate";
-
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        if (dominantPeriod.HasValue)
-                            command.Parameters.AddWithValue("@DominantPeriod", dominantPeriod.Value);
-                        else
-                            command.Parameters.AddWithValue("@DominantPeriod", DBNull.Value);
-
-                        if (phase.HasValue)
-                            command.Parameters.AddWithValue("@Phase", phase.Value);
-                        else
-                            command.Parameters.AddWithValue("@Phase", DBNull.Value);
-
-                        if (isBullishPhase.HasValue)
-                            command.Parameters.AddWithValue("@IsBullishPhase", isBullishPhase.Value);
-                        else
-                            command.Parameters.AddWithValue("@IsBullishPhase", DBNull.Value);
-
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                        int rowsAffected = command.ExecuteNonQuery();
-                        updatedRows += rowsAffected;
-                        //Console.WriteLine($"Rows affected by update: {rowsAffected}");
-
-                        if (rowsAffected == 0)
-                        {
-                            //Console.WriteLine("Warning: No rows were updated. Verify WHERE clause conditions.");
-                            //Console.WriteLine($"ProductId: {productId}, Granularity: {granularity}, StartDate: {candles[i].Date}");
-                        }
-                    }
-
-                    if (i % 1000 == 0 && i > 0)
-                    {
-                        //Console.WriteLine($"Processed {i} candles. Total updates so far: {updatedRows}");
+                        results[candles[i].Date] = (null, null, null);
                     }
                 }
+            });
 
-                //Console.WriteLine($"CyclicalPatternsIndicator calculation completed. Total candles processed: {candles.Count}");
-                //Console.WriteLine($"Total rows updated in database: {updatedRows}");
-            }
-            catch (Exception)
+            // Batch update
+            const int batchSize = 5000;
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET CycleDominantPeriod = @DominantPeriod,
+                    CyclePhase = @Phase,
+                    IsBullishCyclePhase = @IsBullishPhase
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = @StartDate";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@DominantPeriod", SqliteType.Integer);
+            command.Parameters.Add("@Phase", SqliteType.Real);
+            command.Parameters.Add("@IsBullishPhase", SqliteType.Integer);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Text);
+
+            foreach (var batch in results.Keys.Chunk(batchSize))
             {
-                //Console.WriteLine($"Error in CyclicalPatternsIndicator: {ex.Message}");
-                //Console.WriteLine($"Stack Trace: {ex.StackTrace}");
-                throw;
+                foreach (var date in batch)
+                {
+                    var (dominantPeriod, phase, isBullishPhase) = results[date];
+                    command.Parameters["@DominantPeriod"].Value = dominantPeriod.HasValue ? (object)dominantPeriod.Value : DBNull.Value;
+                    command.Parameters["@Phase"].Value = phase.HasValue ? (object)phase.Value : DBNull.Value;
+                    command.Parameters["@IsBullishPhase"].Value = isBullishPhase.HasValue ? (object)(isBullishPhase.Value ? 1 : 0) : DBNull.Value;
+                    command.Parameters["@StartDate"].Value = date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+                    command.ExecuteNonQuery();
+                }
             }
         }
 
-        private static int GetCyclePeriodForGranularity(string granularity)
+        private static int GetCyclePeriodForGranularity(string granularity) => granularity switch
         {
-            return granularity switch
-            {
-                "ONE_MINUTE" => 60 * 24 * 7,  // One week
-                "FIVE_MINUTE" => 12 * 24 * 7,  // One week
-                "FIFTEEN_MINUTE" => 4 * 24 * 7,  // One week
-                "ONE_HOUR" => 24 * 7,  // One week
-                "ONE_DAY" => 365,  // One year
-                _ => throw new ArgumentException($"Unsupported granularity: {granularity}")
-            };
-        }
+            "ONE_MINUTE" => 60 * 24 * 7,
+            "FIVE_MINUTE" => 12 * 24 * 7,
+            "FIFTEEN_MINUTE" => 4 * 24 * 7,
+            "ONE_HOUR" => 24 * 7,
+            "ONE_DAY" => 365,
+            _ => throw new ArgumentException($"Unsupported granularity: {granularity}")
+        };
 
-        private static int FindSimpleDominantPeriod(double[] data)
+        private static int? FindSimpleDominantPeriod(Span<double> data)
         {
-            //Console.WriteLine("Starting FindSimpleDominantPeriod calculation");
-            var autocorrelation = Autocorrelation(data);
+            var autocorrelation = FastAutocorrelation(data);
             for (int i = 1; i < autocorrelation.Length - 1; i++)
             {
                 if (autocorrelation[i] > autocorrelation[i - 1] && autocorrelation[i] > autocorrelation[i + 1])
                 {
-                    //Console.WriteLine($"Dominant period found: {i}");
                     return i;
                 }
             }
-            //Console.WriteLine("No clear dominant period found, using fallback");
             return data.Length / 2; // fallback
         }
 
-        private static double[] Autocorrelation(double[] data)
+        private static double[] FastAutocorrelation(Span<double> data)
         {
-            //Console.WriteLine("Calculating Autocorrelation");
             int n = data.Length;
-            double mean = data.Average();
-            double[] centered = data.Select(x => x - mean).ToArray();
-            double[] result = new double[n];
-
-            for (int lag = 0; lag < n; lag++)
+            var fft = new Complex[n];
+            for (int i = 0; i < n; i++)
             {
-                double numerator = 0, denominator = 0;
-                for (int i = 0; i < n - lag; i++)
-                {
-                    numerator += centered[i] * centered[i + lag];
-                    denominator += centered[i] * centered[i];
-                }
-                result[lag] = numerator / denominator;
+                fft[i] = new Complex(data[i], 0);
             }
 
-            //Console.WriteLine("Autocorrelation calculation completed");
+            FourierTransform.FFT(fft, FourierTransform.Direction.Forward);
+
+            for (int i = 0; i < n; i++)
+            {
+                fft[i] = Complex.Multiply(fft[i], Complex.Conjugate(fft[i]));
+            }
+
+            FourierTransform.FFT(fft, FourierTransform.Direction.Backward);
+
+            var result = new double[n];
+            double scale = 1.0 / (n * data[0]);
+            for (int i = 0; i < n; i++)
+            {
+                result[i] = fft[i].Real * scale;
+            }
+
             return result;
         }
 
-        private static double CalculatePhase(int position, int period)
+        private static double CalculatePhase(int position, int period) => 2 * Math.PI * position / period;
+    }
+
+    // Simple FFT implementation
+    public static class FourierTransform
+    {
+        public enum Direction { Forward = 1, Backward = -1 };
+
+        public static void FFT(Complex[] data, Direction direction)
         {
-            return 2 * Math.PI * position / period;
+            int n = data.Length;
+            if (n <= 1) return;
+
+            Complex[] even = new Complex[n / 2];
+            Complex[] odd = new Complex[n / 2];
+
+            for (int i = 0; i < n / 2; i++)
+            {
+                even[i] = data[2 * i];
+                odd[i] = data[2 * i + 1];
+            }
+
+            FFT(even, direction);
+            FFT(odd, direction);
+
+            double angle = 2 * Math.PI / n * (int)direction;
+            Complex w = Complex.One;
+            Complex wn = new Complex(Math.Cos(angle), Math.Sin(angle));
+
+            for (int k = 0; k < n / 2; k++)
+            {
+                data[k] = even[k] + w * odd[k];
+                data[k + n / 2] = even[k] - w * odd[k];
+                if (direction == Direction.Backward)
+                {
+                    data[k] /= 2;
+                    data[k + n / 2] /= 2;
+                }
+                w *= wn;
+            }
         }
     }
 }
