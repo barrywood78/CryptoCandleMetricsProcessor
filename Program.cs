@@ -1,43 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using CryptoCandleMetricsProcessor.Analysis;
+﻿using CryptoCandleMetricsProcessor.Analysis;
 using CryptoCandleMetricsProcessor.Database;
 using CryptoCandleMetricsProcessor.Models;
 using CryptoCandleMetricsProcessor.Importers;
-using Microsoft.Data.Sqlite;
 using CryptoCandleMetricsProcessor.Exporters;
-using System.Reflection.Metadata;
-using System.Text;
-using CryptoCandleMetricsProcessor.Utilities;
+using SwiftLogger;
+using SwiftLogger.Configs;
+using SwiftLogger.Enums;
 
 namespace CryptoCandleMetricsProcessor
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             DateTime startTime = DateTime.Now;
             string timestamp = startTime.ToString("yyyyMMdd_HHmmss");
-            string logFilePath = $"consoleLog_{timestamp}.txt";
 
-            using (StreamWriter writer = new StreamWriter(logFilePath))
-            {
-                // Create a multi-writer to write to both console and file
-                var multiWriter = new MultiTextWriter(Console.Out, writer);
-                Console.SetOut(multiWriter);
+            var consoleConfig = new ConsoleLoggerConfig()
+                .SetColorForLogLevel(LogLevel.Error, ConsoleColor.Red)
+                .SetColorForLogLevel(LogLevel.Warning, ConsoleColor.Green)
+                .SetMinimumLogLevel(LogLevel.Information);
 
-                Console.WriteLine($"Application started at: {startTime}");
+            var fileConfig = new FileLoggerConfig()
+                .SetFilePath(@"MetricsProcessorLog-{timestamp}.txt")
+                .EnableSeparationByDate();
 
-                // Path to the folder containing CSV files
-                string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
+            var logger = new LoggerConfigBuilder()
+                .LogTo.Console(consoleConfig)
+                .LogTo.File(fileConfig)
+                .Build();
 
-                // Get the field definitions from the separate class
-                var fields = Fields.GetFields();
 
-                // Define the mappings between CSV columns and database fields
-                var mappings = new List<CsvToDbMapping>
+            await logger.Log(LogLevel.Information, $"Application started at: {startTime}");
+
+            // Path to the folder containing CSV files
+            string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
+
+            // Get the field definitions from the separate class
+            var fields = Fields.GetFields();
+
+            // Define the mappings between CSV columns and database fields
+            var mappings = new List<CsvToDbMapping>
                 {
                     new CsvToDbMapping { CsvColumnIndex = 0, DbFieldName = "ProductId" },
                     new CsvToDbMapping { CsvColumnIndex = 1, DbFieldName = "Granularity" },
@@ -50,49 +53,47 @@ namespace CryptoCandleMetricsProcessor
                     new CsvToDbMapping { CsvColumnIndex = 8, DbFieldName = "Volume" }
                 };
 
-                // Define the database file path and table name
-                string dbFilePath = "candles_data.sqlite";
-                string tableName = "Candles";
+            // Define the database file path and table name
+            string dbFilePath = "candles_data.sqlite";
+            string tableName = "Candles";
 
-                // Delete the database file if it already exists
-                if (File.Exists(dbFilePath))
-                {
-                    File.Delete(dbFilePath);
-                }
-
-                // Create the database with the specified table and fields
-                DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
-
-                // Get all CSV file paths from the specified folder
-                var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
-
-                // Import each CSV file into the database
-                foreach (var csvFilePath in csvFilePaths)
-                {
-                    CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
-                    Console.WriteLine($"CSV data from {csvFilePath} imported successfully.");
-                }
-
-                // Calculate technical analysis indicators
-                TechnicalAnalysis.CalculateIndicators(dbFilePath, tableName);
-                Console.WriteLine("Indicators calculated successfully.");
-
-                // Export the database to CSV
-                CsvExporter.ExportDatabaseToCsv(dbFilePath);
-                Console.WriteLine("CSV data exported successfully.");
-
-                var endTime = DateTime.Now;
-                Console.WriteLine($"Application completed at: {endTime}");
-
-                // Calculate the duration
-                var duration = endTime - startTime;
-                Console.WriteLine($"Total time taken: {duration.Hours} hours, {duration.Minutes} minutes, {duration.Seconds} seconds");
+            // Delete the database file if it already exists
+            if (File.Exists(dbFilePath))
+            {
+                File.Delete(dbFilePath);
             }
 
-            // Reset console output to standard output
-            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+            // Create the database with the specified table and fields
+            DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
+
+            // Get all CSV file paths from the specified folder
+            var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
+
+            // Import each CSV file into the database
+            foreach (var csvFilePath in csvFilePaths)
+            {
+                CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
+                await logger.Log(LogLevel.Information, $"CSV data from {csvFilePath} imported successfully.");
+            }
+
+            // Calculate technical analysis indicators
+            await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
+            await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
+
+            // Export the database to CSV
+            CsvExporter.ExportDatabaseToCsv(dbFilePath);
+            await logger.Log(LogLevel.Information, "CSV data exported successfully.");
+
+            var endTime = DateTime.Now;
+            await logger.Log(LogLevel.Information, $"Application completed at: {endTime}");
+
+            // Calculate the duration
+            var duration = endTime - startTime;
+            await logger.Log(LogLevel.Information, $"Total time taken: {duration.Hours} hours, {duration.Minutes} minutes, {duration.Seconds} seconds");
         }
+
+
     }
 
-    
+
 }
