@@ -92,8 +92,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             using var command = new SqliteCommand(@"
                 UPDATE " + tableName + @"
                 SET CandlePattern = @CandlePattern,
-                    CandlePatternRank = @CandlePatternRank,
-                    CandlePatternScaledRank = @CandlePatternScaledRank,
+                    CandlePatternPriority = @CandlePatternPriority,
+                    CandlePatternScore = @CandlePatternScore,
                     CandlePatternMatchCount = @CandlePatternMatchCount
                 WHERE ProductId = @ProductId
                   AND Granularity = @Granularity
@@ -101,8 +101,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
             // Add parameters
             command.Parameters.Add("@CandlePattern", SqliteType.Text);
-            command.Parameters.Add("@CandlePatternRank", SqliteType.Integer);
-            command.Parameters.Add("@CandlePatternScaledRank", SqliteType.Integer);
+            command.Parameters.Add("@CandlePatternPriority", SqliteType.Integer);
+            command.Parameters.Add("@CandlePatternScore", SqliteType.Integer);
             command.Parameters.Add("@CandlePatternMatchCount", SqliteType.Integer);
             command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
             command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
@@ -131,8 +131,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     }
 
                     command.Parameters["@CandlePattern"].Value = bestPattern;
-                    command.Parameters["@CandlePatternRank"].Value = bestPattern == "NO_PATTERN" ? DBNull.Value : (object)bestRank;
-                    command.Parameters["@CandlePatternScaledRank"].Value = bestPattern == "NO_PATTERN" ? DBNull.Value : (object)GetScaledRanking(bestRank);
+                    command.Parameters["@CandlePatternPriority"].Value = bestPattern == "NO_PATTERN" ? 999 : bestRank;
+                    command.Parameters["@CandlePatternScore"].Value = bestPattern == "NO_PATTERN" ? 0 : GetScaledRanking(bestRank);
                     command.Parameters["@CandlePatternMatchCount"].Value = matchCount;
                     command.Parameters["@StartDate"].Value = candles[j].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 

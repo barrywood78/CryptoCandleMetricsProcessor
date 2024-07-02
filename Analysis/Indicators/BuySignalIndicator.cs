@@ -62,10 +62,28 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     ELSE 0 
                 END) +
                 (CASE WHEN MACD > MACD_Signal THEN 1 ELSE 0 END) +
-                (CASE WHEN Volume > Lagged_Close_1 THEN 1 ELSE 0 END) +
+                (CASE 
+                    WHEN RelativeVolume > 2 THEN 3
+                    WHEN RelativeVolume > 1 THEN 2
+                    WHEN RelativeVolume > 0 THEN 1
+                    ELSE 0 
+                END) +
                 (CASE 
                     WHEN ATR > Lagged_ATR_1 * 1.2 THEN 2
                     WHEN ATR > Lagged_ATR_1 THEN 1
+                    ELSE 0
+                END) +
+                (CASE 
+                    WHEN MarketRegime = 'Trending Up' THEN 2
+                    WHEN MarketRegime = 'Trending Down' THEN -2
+                    WHEN MarketRegime = 'Ranging' THEN 0
+                    WHEN MarketRegime = 'Transitioning' THEN 1
+                    ELSE 0 
+                END) +
+                (CASE 
+                    WHEN CandlePatternScore >= 8 THEN 3
+                    WHEN CandlePatternScore >= 6 THEN 2
+                    WHEN CandlePatternScore >= 4 THEN 1
                     ELSE 0
                 END)
             WHERE ProductId = @ProductId AND Granularity = @Granularity";
@@ -119,7 +137,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 foreach (var score in allScores.Distinct())
                 {
-                    var buySignal = score >= 14 ? 1 : 0;
+                    var buySignal = score >= 16 ? 1 : 0;
 
                     command.Parameters.Clear();
                     command.Parameters.AddWithValue("@BuySignal", buySignal);

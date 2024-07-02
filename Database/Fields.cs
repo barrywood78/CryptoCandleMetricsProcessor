@@ -138,8 +138,8 @@ namespace CryptoCandleMetricsProcessor.Database
                 new FieldDefinition { Name = "RSIDivergenceStrength", DataType = "REAL" },
                 new FieldDefinition { Name = "VolatilityRegime", DataType = "TEXT" },
                 new FieldDefinition { Name = "CandlePattern", DataType = "TEXT" },
-                new FieldDefinition { Name = "CandlePatternRank", DataType = "INTEGER" },
-                new FieldDefinition { Name = "CandlePatternScaledRank", DataType = "INTEGER" },
+                new FieldDefinition { Name = "CandlePatternPriority", DataType = "INTEGER" },
+                new FieldDefinition { Name = "CandlePatternScore", DataType = "INTEGER" },
                 new FieldDefinition { Name = "CandlePatternMatchCount", DataType = "INTEGER" },
                 new FieldDefinition { Name = "BuySignal", DataType = "INTEGER" } // Target field for ML prediction
             };

@@ -6,6 +6,7 @@ using CryptoCandleMetricsProcessor.Exporters;
 using SwiftLogger;
 using SwiftLogger.Configs;
 using SwiftLogger.Enums;
+using CryptoCandleMetricsProcessor.PostProcessing;
 
 namespace CryptoCandleMetricsProcessor
 {
@@ -22,7 +23,7 @@ namespace CryptoCandleMetricsProcessor
                 .SetMinimumLogLevel(LogLevel.Information);
 
             var fileConfig = new FileLoggerConfig()
-                .SetFilePath(@"MetricsProcessorLog-{timestamp}.txt")
+                .SetFilePath($"MetricsProcessorLog-{timestamp}.txt")
                 .EnableSeparationByDate();
 
             var logger = new LoggerConfigBuilder()
@@ -79,6 +80,10 @@ namespace CryptoCandleMetricsProcessor
             // Calculate technical analysis indicators
             await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
             await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
+
+            // Post-process data to handle null values
+            await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
+            await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
 
             // Export the database to CSV
             CsvExporter.ExportDatabaseToCsv(dbFilePath);
