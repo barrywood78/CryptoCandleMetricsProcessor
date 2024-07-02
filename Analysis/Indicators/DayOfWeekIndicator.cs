@@ -12,7 +12,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         {
             foreach (var candle in candles)
             {
-                int dayOfWeek = (int)candle.Date.DayOfWeek;
+                // Adjusting the dayOfWeek to ensure Monday is 1 and Sunday is 7
+                int dayOfWeek = ((int)candle.Date.DayOfWeek == 0) ? 7 : (int)candle.Date.DayOfWeek;
 
                 string updateQuery = $@"
                     UPDATE {tableName}
