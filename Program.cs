@@ -7,6 +7,7 @@ using SwiftLogger;
 using SwiftLogger.Configs;
 using SwiftLogger.Enums;
 using CryptoCandleMetricsProcessor.PostProcessing;
+using System;
 
 namespace CryptoCandleMetricsProcessor
 {
@@ -30,7 +31,6 @@ namespace CryptoCandleMetricsProcessor
                 .LogTo.Console(consoleConfig)
                 .LogTo.File(fileConfig)
                 .Build();
-
 
             await logger.Log(LogLevel.Information, $"Application started at: {startTime}");
 
@@ -58,36 +58,71 @@ namespace CryptoCandleMetricsProcessor
             string dbFilePath = "candles_data.sqlite";
             string tableName = "Candles";
 
-            // Delete the database file if it already exists
-            if (File.Exists(dbFilePath))
+            bool exit = false;
+            while (!exit)
             {
-                File.Delete(dbFilePath);
+                Console.WriteLine("Select an option:");
+                Console.WriteLine("1. Delete existing database");
+                Console.WriteLine("2. Create database with table");
+                Console.WriteLine("3. Import CSV files into database");
+                Console.WriteLine("4. Calculate technical analysis indicators");
+                Console.WriteLine("5. Post-process data");
+                Console.WriteLine("6. Export database to CSV");
+                Console.WriteLine("7. Exit");
+
+                var input = Console.ReadLine();
+                switch (input)
+                {
+                    case "1":
+                        if (File.Exists(dbFilePath))
+                        {
+                            File.Delete(dbFilePath);
+                            await logger.Log(LogLevel.Information, "Existing database deleted.");
+                        }
+                        else
+                        {
+                            await logger.Log(LogLevel.Warning, "Database file not found.");
+                        }
+                        break;
+
+                    case "2":
+                        DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
+                        await logger.Log(LogLevel.Information, "Database created with table.");
+                        break;
+
+                    case "3":
+                        var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
+                        foreach (var csvFilePath in csvFilePaths)
+                        {
+                            CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
+                            await logger.Log(LogLevel.Information, $"CSV data from {csvFilePath} imported successfully.");
+                        }
+                        break;
+
+                    case "4":
+                        await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
+                        await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
+                        break;
+
+                    case "5":
+                        await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
+                        await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
+                        break;
+
+                    case "6":
+                        CsvExporter.ExportDatabaseToCsv(dbFilePath);
+                        await logger.Log(LogLevel.Information, "CSV data exported successfully.");
+                        break;
+
+                    case "7":
+                        exit = true;
+                        break;
+
+                    default:
+                        Console.WriteLine("Invalid option. Please try again.");
+                        break;
+                }
             }
-
-            // Create the database with the specified table and fields
-            DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
-
-            // Get all CSV file paths from the specified folder
-            var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
-
-            // Import each CSV file into the database
-            foreach (var csvFilePath in csvFilePaths)
-            {
-                CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
-                await logger.Log(LogLevel.Information, $"CSV data from {csvFilePath} imported successfully.");
-            }
-
-            // Calculate technical analysis indicators
-            await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
-            await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
-
-            // Post-process data to handle null values
-            await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
-            await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
-
-            // Export the database to CSV
-            CsvExporter.ExportDatabaseToCsv(dbFilePath);
-            await logger.Log(LogLevel.Information, "CSV data exported successfully.");
 
             var endTime = DateTime.Now;
             await logger.Log(LogLevel.Information, $"Application completed at: {endTime}");
@@ -96,9 +131,5 @@ namespace CryptoCandleMetricsProcessor
             var duration = endTime - startTime;
             await logger.Log(LogLevel.Information, $"Total time taken: {duration.Hours} hours, {duration.Minutes} minutes, {duration.Seconds} seconds");
         }
-
-
     }
-
-
 }
