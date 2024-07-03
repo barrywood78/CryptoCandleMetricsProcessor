@@ -21,12 +21,10 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 var productGranularityPairs = await GetProductGranularityPairsAsync(connection, tableName);
                 await logger.Log(LogLevel.Information, $"Found {productGranularityPairs.Count} product-granularity pairs to process.");
 
-                foreach (var pair in productGranularityPairs)
-                {
-                    await ProcessPairAsync(connection, tableName, pair.ProductId, pair.Granularity, logger);
-                }
+                var tasks = productGranularityPairs.Select(pair => ProcessPairAsync(connectionString, tableName, pair.ProductId, pair.Granularity, logger)).ToArray();
+                await Task.WhenAll(tasks);
 
-                await CheckRemainingNulls(connection, tableName, logger);
+                await CheckRemainingNulls(connectionString, tableName, logger);
             }
 
             await logger.Log(LogLevel.Information, "Post-processing completed successfully.");
@@ -49,74 +47,75 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             return pairs;
         }
 
-        private static async Task ProcessPairAsync(SqliteConnection connection, string tableName, string productId, string granularity, SwiftLogger.SwiftLogger logger)
+        private static async Task ProcessPairAsync(string connectionString, string tableName, string productId, string granularity, SwiftLogger.SwiftLogger logger)
         {
-            using (var transaction = connection.BeginTransaction())
+            using (var connection = new SqliteConnection(connectionString))
             {
-                try
+                await connection.OpenAsync();
+
+                using (var transaction = connection.BeginTransaction())
                 {
-                    // Backfill for trend-based indicators and most other numerical fields
-                    var backfillFields = new[]
+                    try
                     {
-                        "SMA", "EMA", "ATR", "TEMA", "BB_SMA", "BB_UpperBand", "BB_LowerBand",
-                        "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
-                        "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
-                        "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
-                        "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
-                        "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel"
-                    };
-                    await BackfillFields(connection, tableName, productId, granularity, backfillFields);
+                        var tasks = new List<Task>
+                        {
+                            BackfillFields(connection, tableName, productId, granularity, new[]
+                            {
+                                "SMA", "EMA", "ATR", "TEMA", "BB_SMA", "BB_UpperBand", "BB_LowerBand",
+                                "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
+                                "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
+                                "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
+                                "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
+                                "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel"
+                            }),
 
-                    // Fill with neutral value for oscillators and bounded indicators
-                    var neutralValueFields = new[]
+                            FillWithNeutralValue(connection, tableName, productId, granularity, new[]
+                            {
+                                "RSI", "ADX", "BB_PercentB", "Stoch_K", "Stoch_D", "WilliamsR", "CMF", "CCI"
+                            }, 50),
+
+                            FillWithValue(connection, tableName, productId, granularity, new[]
+                            {
+                                "PriceUpStreak", "BuyScore", "BB_ZScore", "BB_Width", "MACD_Histogram",
+                                "PriceChangePercent", "VolumeChangePercent", "ATRPercent", "RSIChange",
+                                "MACDHistogramSlope", "DistanceToNearestSupport", "DistanceToNearestResistance",
+                                "DistanceToDynamicSupport", "DistanceToDynamicResistance", "ADLChange"
+                            }, 0),
+
+                            FillBooleanFields(connection, tableName, productId, granularity, new[]
+                            {
+                                "PriceUp", "IsUptrend", "IsBullishCyclePhase"
+                            }, false),
+
+                            FillCategoricalFields(connection, tableName, productId, granularity),
+
+                            BackfillLaggedFields(connection, tableName, productId, granularity, new[]
+                            {
+                                "Lagged_Close", "Lagged_RSI", "Lagged_Return", "Lagged_EMA", "Lagged_ATR",
+                                "Lagged_MACD", "Lagged_BollingerUpper", "Lagged_BollingerLower",
+                                "Lagged_BollingerPercentB", "Lagged_StochK", "Lagged_StochD"
+                            }),
+
+                            FillSpecificFields(connection, tableName, productId, granularity)
+                        };
+
+                        await Task.WhenAll(tasks);
+
+                        transaction.Commit();
+                        await logger.Log(LogLevel.Information, $"Processed data for {productId} - {granularity}");
+                    }
+                    catch (Exception ex)
                     {
-                        "RSI", "ADX", "BB_PercentB", "Stoch_K", "Stoch_D", "WilliamsR", "CMF", "CCI"
-                    };
-                    await FillWithNeutralValue(connection, tableName, productId, granularity, neutralValueFields, 50);
-
-                    // Fill with zero for difference-based indicators
-                    var zeroFillFields = new[]
-                    {
-                        "PriceUpStreak", "BuyScore", "BB_ZScore", "BB_Width", "MACD_Histogram",
-                        "PriceChangePercent", "VolumeChangePercent", "ATRPercent", "RSIChange",
-                        "MACDHistogramSlope", "DistanceToNearestSupport", "DistanceToNearestResistance",
-                        "DistanceToDynamicSupport", "DistanceToDynamicResistance", "ADLChange"  
-                    };
-                    await FillWithValue(connection, tableName, productId, granularity, zeroFillFields, 0);
-
-                    // Handle boolean fields
-                    var booleanFields = new[] { "PriceUp", "IsUptrend", "IsBullishCyclePhase" };
-                    await FillBooleanFields(connection, tableName, productId, granularity, booleanFields, false);
-
-                    // Handle categorical fields
-                    await FillCategoricalFields(connection, tableName, productId, granularity);
-
-                    // Handle lagged fields
-                    var laggedFields = new[]
-                    {
-                        "Lagged_Close", "Lagged_RSI", "Lagged_Return", "Lagged_EMA", "Lagged_ATR",
-                        "Lagged_MACD", "Lagged_BollingerUpper", "Lagged_BollingerLower",
-                        "Lagged_BollingerPercentB", "Lagged_StochK", "Lagged_StochD"
-                    };
-                    await BackfillLaggedFields(connection, tableName, productId, granularity, laggedFields);
-
-                    // Handle specific fields
-                    await FillSpecificFields(connection, tableName, productId, granularity);
-
-                    transaction.Commit();
-                    await logger.Log(LogLevel.Information, $"Processed data for {productId} - {granularity}");
-                }
-                catch (Exception ex)
-                {
-                    transaction.Rollback();
-                    await logger.Log(LogLevel.Error, $"Error processing data for {productId} - {granularity}: {ex.Message}");
+                        transaction.Rollback();
+                        await logger.Log(LogLevel.Error, $"Error processing data for {productId} - {granularity}: {ex.Message}");
+                    }
                 }
             }
         }
 
         private static async Task BackfillFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields)
         {
-            foreach (var field in fields)
+            var tasks = fields.Select(field =>
             {
                 var command = connection.CreateCommand();
                 command.CommandText = $@"
@@ -135,9 +134,10 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
 
-                int rowsAffected = await command.ExecuteNonQueryAsync();
-                //Console.WriteLine($"Backfill: Updated {rowsAffected} rows for {field}");
-            }
+                return command.ExecuteNonQueryAsync();
+            });
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task FillWithNeutralValue(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, double neutralValue)
@@ -147,7 +147,7 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
 
         private static async Task FillWithValue(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, double value)
         {
-            foreach (var field in fields)
+            var tasks = fields.Select(field =>
             {
                 var command = connection.CreateCommand();
                 command.CommandText = $@"
@@ -159,14 +159,15 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
 
-                int rowsAffected = await command.ExecuteNonQueryAsync();
-                //Console.WriteLine($"FillWithValue: Updated {rowsAffected} rows for {field} with value {value}");
-            }
+                return command.ExecuteNonQueryAsync();
+            });
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task FillBooleanFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, bool defaultValue)
         {
-            foreach (var field in fields)
+            var tasks = fields.Select(field =>
             {
                 var command = connection.CreateCommand();
                 command.CommandText = $@"
@@ -178,9 +179,10 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
 
-                int rowsAffected = await command.ExecuteNonQueryAsync();
-                //Console.WriteLine($"FillBooleanFields: Updated {rowsAffected} rows for {field} with value {defaultValue}");
-            }
+                return command.ExecuteNonQueryAsync();
+            });
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task FillCategoricalFields(SqliteConnection connection, string tableName, string productId, string granularity)
@@ -193,7 +195,7 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 { "VolatilityRegime", "Normal" }
             };
 
-            foreach (var field in categoricalFields)
+            var tasks = categoricalFields.Select(field =>
             {
                 var command = connection.CreateCommand();
                 command.CommandText = $@"
@@ -205,54 +207,51 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
 
-                int rowsAffected = await command.ExecuteNonQueryAsync();
-                //Console.WriteLine($"FillCategoricalFields: Updated {rowsAffected} rows for {field.Key} with value {field.Value}");
-            }
+                return command.ExecuteNonQueryAsync();
+            });
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task BackfillLaggedFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] baseFields)
         {
-            foreach (var baseField in baseFields)
-            {
-                for (int i = 1; i <= 3; i++)
+            var tasks = baseFields.SelectMany(baseField =>
+                Enumerable.Range(1, 3).Select(i =>
                 {
                     var field = $"{baseField}_{i}";
-                    await BackfillFields(connection, tableName, productId, granularity, new[] { field });
-                }
-            }
+                    return BackfillFields(connection, tableName, productId, granularity, new[] { field });
+                })
+            );
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task FillSpecificFields(SqliteConnection connection, string tableName, string productId, string granularity)
         {
-            // Fill DayOfWeek with actual calculated values
-            await CalculateDayOfWeek(connection, tableName, productId, granularity);
+            var tasks = new List<Task>
+            {
+                CalculateDayOfWeek(connection, tableName, productId, granularity),
 
-            // Fill RelativeVolume and VolumeProfile with 1 (neutral value)
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "RelativeVolume", "VolumeProfile" }, 1);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "RelativeVolume", "VolumeProfile" }, 1),
 
-            // Fill TrendStrength, TrendDuration, CompositeSentiment, CompositeMomentum with 0
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum" }, 0),
 
-            // Fill MACDCrossover and EMACrossover with 0 (no crossover)
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "MACDCrossover", "EMACrossover" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "MACDCrossover", "EMACrossover" }, 0),
 
-            // Fill CycleDominantPeriod and CyclePhase with default values
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "CycleDominantPeriod", "CyclePhase" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "CycleDominantPeriod", "CyclePhase" }, 0),
 
-            // Fill FractalDimension, HurstExponent, MarketEfficiencyRatio with neutral values
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "FractalDimension", "HurstExponent", "MarketEfficiencyRatio" }, 0.5);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "FractalDimension", "HurstExponent", "MarketEfficiencyRatio" }, 0.5),
 
-            // Fill MarketVolatility and OrderFlowImbalance with 0
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "MarketVolatility", "OrderFlowImbalance" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "MarketVolatility", "OrderFlowImbalance" }, 0),
 
-            // Fill RSIDivergence and MACDDivergence with 0 (no divergence)
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergence", "MACDDivergence" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergence", "MACDDivergence" }, 0),
 
-            // Fill RSIDivergenceStrength with 0
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergenceStrength" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergenceStrength" }, 0),
 
-            // Fill HistoricalVolatility, ROC_5, ROC_10 with 0
-            await FillWithValue(connection, tableName, productId, granularity, new[] { "HistoricalVolatility", "ROC_5", "ROC_10" }, 0);
+                FillWithValue(connection, tableName, productId, granularity, new[] { "HistoricalVolatility", "ROC_5", "ROC_10" }, 0)
+            };
+
+            await Task.WhenAll(tasks);
         }
 
         private static async Task CalculateDayOfWeek(SqliteConnection connection, string tableName, string productId, string granularity)
@@ -269,53 +268,60 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             await command.ExecuteNonQueryAsync();
         }
 
-        private static async Task CheckRemainingNulls(SqliteConnection connection, string tableName, SwiftLogger.SwiftLogger logger)
+        private static async Task CheckRemainingNulls(string connectionString, string tableName, SwiftLogger.SwiftLogger logger)
+        {
+            using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync();
+
+                var command = connection.CreateCommand();
+                command.CommandText = $@"
+                    SELECT name FROM pragma_table_info('{tableName}')
+                    WHERE type LIKE 'INTEGER' OR type LIKE 'REAL' OR type LIKE 'NUMERIC';";
+
+                var numericColumns = new List<string>();
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        numericColumns.Add(reader.GetString(0));
+                    }
+                }
+
+                var tasks = numericColumns.Select(async column =>
+                {
+                    command = connection.CreateCommand();
+                    command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE {column} IS NULL;";
+                    long nullCount = (long)(await command.ExecuteScalarAsync() ?? 0L);
+
+
+                    if (nullCount > 0)
+                    {
+                        await logger.Log(LogLevel.Warning, $"Column {column} still has {nullCount} null values.");
+
+                        // Backfill remaining nulls based on the next non-null value
+                        await BackfillRemainingNulls(connection, tableName, column, logger);
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+            }
+        }
+
+        private static async Task BackfillRemainingNulls(SqliteConnection connection, string tableName, string column, SwiftLogger.SwiftLogger logger)
         {
             var command = connection.CreateCommand();
             command.CommandText = $@"
-                SELECT name FROM pragma_table_info('{tableName}')
-                WHERE type LIKE 'INTEGER' OR type LIKE 'REAL' OR type LIKE 'NUMERIC';";
+                WITH next_non_null AS (
+                    SELECT RowId, LEAD({column}) OVER (ORDER BY RowId) as NextNonNullValue
+                    FROM {tableName}
+                )
+                UPDATE {tableName}
+                SET {column} = (SELECT NextNonNullValue FROM next_non_null WHERE {tableName}.RowId = next_non_null.RowId)
+                WHERE {column} IS NULL;";
 
-            var numericColumns = new List<string>();
-            using (var reader = await command.ExecuteReaderAsync())
-            {
-                while (await reader.ReadAsync())
-                {
-                    numericColumns.Add(reader.GetString(0));
-                }
-            }
-
-            foreach (var column in numericColumns)
-            {
-                command = connection.CreateCommand();
-                command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE {column} IS NULL;";
-                long nullCount = (long)await command.ExecuteScalarAsync();
-
-                if (nullCount > 0)
-                {
-                    await logger.Log(LogLevel.Warning, $"Column {column} still has {nullCount} null values.");
-
-                    // Optional: Log a sample of rows with null values for this column
-                    command = connection.CreateCommand();
-                    command.CommandText = $@"
-                        SELECT ProductId, Granularity, StartUnix, StartDate
-                        FROM {tableName}
-                        WHERE {column} IS NULL
-                        LIMIT 5;";
-
-                    using (var reader = await command.ExecuteReaderAsync())
-                    {
-                        while (await reader.ReadAsync())
-                        {
-                            string sampleRow = $"ProductId: {reader.GetString(0)}, " +
-                                               $"Granularity: {reader.GetString(1)}, " +
-                                               $"StartUnix: {reader.GetInt64(2)}, " +
-                                               $"StartDate: {reader.GetDateTime(3)}";
-                            await logger.Log(LogLevel.Warning, $"Sample row with null {column}: {sampleRow}");
-                        }
-                    }
-                }
-            }
+            int rowsAffected = await command.ExecuteNonQueryAsync();
+            await logger.Log(LogLevel.Information, $"BackfillRemainingNulls: Updated {rowsAffected} rows for {column} with the next non-null value.");
         }
     }
 }

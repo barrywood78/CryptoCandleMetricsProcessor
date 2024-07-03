@@ -22,7 +22,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 
             Parallel.For(period - 1, closePrices.Length, i =>
             {
-                var window = closePrices.AsSpan().Slice(i - period + 1, period);
+                var window = closePrices.AsSpan().Slice(i - period + 1, period).ToArray();
                 var stats = CalculateStatistics(window);
                 lock (results)
                 {
@@ -33,31 +33,32 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             UpdateDatabase(connection, transaction, tableName, productId, granularity, results);
         }
 
-        private static (double Mean, double StdDev, double Variance, double Skewness, double Kurtosis) CalculateStatistics(Span<double> data)
+        private static (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis) CalculateStatistics(double[] data)
         {
-            double sum = 0, sumSquared = 0, sumCubed = 0, sumFourth = 0;
-            for (int i = 0; i < data.Length; i++)
+            if (data.Length == 0)
+                return (null, null, null, null, null);
+
+            try
             {
-                double x = data[i];
-                sum += x;
-                double x2 = x * x;
-                sumSquared += x2;
-                sumCubed += x2 * x;
-                sumFourth += x2 * x2;
+                double mean = data.Mean();
+                double stdDev = data.StandardDeviation();
+                double variance = data.Variance();
+                double skewness = data.Skewness();
+                double kurtosis = data.Kurtosis();
+
+                return (
+                    double.IsNaN(mean) || double.IsInfinity(mean) ? (double?)null : mean,
+                    double.IsNaN(stdDev) || double.IsInfinity(stdDev) ? (double?)null : stdDev,
+                    double.IsNaN(variance) || double.IsInfinity(variance) ? (double?)null : variance,
+                    double.IsNaN(skewness) || double.IsInfinity(skewness) ? (double?)null : skewness,
+                    double.IsNaN(kurtosis) || double.IsInfinity(kurtosis) ? (double?)null : kurtosis
+                );
             }
-
-            double mean = sum / data.Length;
-            double variance = (sumSquared - sum * sum / data.Length) / (data.Length - 1);
-            double stdDev = Math.Sqrt(variance);
-
-            double m2 = sumSquared / data.Length - mean * mean;
-            double m3 = (sumCubed - 3 * mean * sumSquared + 2 * mean * mean * sum) / data.Length;
-            double m4 = (sumFourth - 4 * mean * sumCubed + 6 * mean * mean * sumSquared - 3 * mean * mean * mean * sum) / data.Length;
-
-            double skewness = m3 / (stdDev * stdDev * stdDev);
-            double kurtosis = m4 / (m2 * m2) - 3;
-
-            return (mean, stdDev, variance, skewness, kurtosis);
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in statistical calculation: {ex.Message}");
+                return (null, null, null, null, null);
+            }
         }
 
         private static void UpdateDatabase(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, Dictionary<DateTime, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)> results)
@@ -88,11 +89,11 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                 foreach (var date in batch)
                 {
                     var (mean, stdDev, variance, skewness, kurtosis) = results[date];
-                    command.Parameters["@Mean"].Value = mean.HasValue && !double.IsNaN(mean.Value) ? (object)mean.Value : DBNull.Value;
-                    command.Parameters["@StdDev"].Value = stdDev.HasValue && !double.IsNaN(stdDev.Value) ? (object)stdDev.Value : DBNull.Value;
-                    command.Parameters["@Variance"].Value = variance.HasValue && !double.IsNaN(variance.Value) ? (object)variance.Value : DBNull.Value;
-                    command.Parameters["@Skewness"].Value = skewness.HasValue && !double.IsNaN(skewness.Value) ? (object)skewness.Value : DBNull.Value;
-                    command.Parameters["@Kurtosis"].Value = kurtosis.HasValue && !double.IsNaN(kurtosis.Value) ? (object)kurtosis.Value : DBNull.Value;
+                    command.Parameters["@Mean"].Value = mean.HasValue ? (object)mean.Value : DBNull.Value;
+                    command.Parameters["@StdDev"].Value = stdDev.HasValue ? (object)stdDev.Value : DBNull.Value;
+                    command.Parameters["@Variance"].Value = variance.HasValue ? (object)variance.Value : DBNull.Value;
+                    command.Parameters["@Skewness"].Value = skewness.HasValue ? (object)skewness.Value : DBNull.Value;
+                    command.Parameters["@Kurtosis"].Value = kurtosis.HasValue ? (object)kurtosis.Value : DBNull.Value;
                     command.Parameters["@StartDate"].Value = date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
                     command.ExecuteNonQuery();

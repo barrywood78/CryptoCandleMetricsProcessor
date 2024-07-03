@@ -33,28 +33,32 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         private static double CalculateHurst(ReadOnlySpan<double> prices)
         {
             Span<double> rs = stackalloc double[Lags.Length];
+            Span<double> values = stackalloc double[prices.Length - Lags.Max()]; // Allocate enough space for the largest lag
 
             for (int lagIndex = 0; lagIndex < Lags.Length; lagIndex++)
             {
                 int lag = Lags[lagIndex];
-                Span<double> values = stackalloc double[prices.Length - lag];
+                int valuesLength = prices.Length - lag;
 
-                for (int i = 0; i < values.Length; i++)
+                // Reuse the same span, only use the necessary portion
+                var valuesSlice = values.Slice(0, valuesLength);
+
+                for (int i = 0; i < valuesLength; i++)
                 {
-                    values[i] = Math.Log(prices[i + lag] / prices[i]);
+                    valuesSlice[i] = Math.Log(prices[i + lag] / prices[i]);
                 }
 
                 double mean = 0;
-                for (int i = 0; i < values.Length; i++) mean += values[i];
-                mean /= values.Length;
+                for (int i = 0; i < valuesLength; i++) mean += valuesSlice[i];
+                mean /= valuesLength;
 
                 double sumSquaredDiff = 0;
                 double min = double.MaxValue, max = double.MinValue;
                 double cumSum = 0;
 
-                for (int i = 0; i < values.Length; i++)
+                for (int i = 0; i < valuesLength; i++)
                 {
-                    double adjustedValue = values[i] - mean;
+                    double adjustedValue = valuesSlice[i] - mean;
                     sumSquaredDiff += adjustedValue * adjustedValue;
                     cumSum += adjustedValue;
                     if (cumSum < min) min = cumSum;
@@ -62,7 +66,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                 }
 
                 double range = max - min;
-                double stdDev = Math.Sqrt(sumSquaredDiff / values.Length);
+                double stdDev = Math.Sqrt(sumSquaredDiff / valuesLength);
                 rs[lagIndex] = range / stdDev;
             }
 

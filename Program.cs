@@ -74,6 +74,7 @@ namespace CryptoCandleMetricsProcessor
                 switch (input)
                 {
                     case "1":
+                        await logger.Log(LogLevel.Information, "Attempting to delete existing database.");
                         if (File.Exists(dbFilePath))
                         {
                             File.Delete(dbFilePath);
@@ -86,11 +87,13 @@ namespace CryptoCandleMetricsProcessor
                         break;
 
                     case "2":
+                        await logger.Log(LogLevel.Information, "Creating database with table.");
                         DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
                         await logger.Log(LogLevel.Information, "Database created with table.");
                         break;
 
                     case "3":
+                        await logger.Log(LogLevel.Information, "Starting CSV import process.");
                         var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
                         foreach (var csvFilePath in csvFilePaths)
                         {
@@ -100,16 +103,19 @@ namespace CryptoCandleMetricsProcessor
                         break;
 
                     case "4":
+                        await logger.Log(LogLevel.Information, "Calculating technical analysis indicators.");
                         await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
                         await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
                         break;
 
                     case "5":
+                        await logger.Log(LogLevel.Information, "Starting data post-processing.");
                         await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
                         await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
                         break;
 
                     case "6":
+                        await logger.Log(LogLevel.Information, "Exporting database to CSV.");
                         CsvExporter.ExportDatabaseToCsv(dbFilePath);
                         await logger.Log(LogLevel.Information, "CSV data exported successfully.");
                         break;
@@ -121,6 +127,13 @@ namespace CryptoCandleMetricsProcessor
                     default:
                         Console.WriteLine("Invalid option. Please try again.");
                         break;
+                }
+
+                if (!exit)
+                {
+                    Console.WriteLine("\nProcess completed. Press any key to return to the menu.");
+                    Console.ReadKey();
+                    Console.Clear();
                 }
             }
 
