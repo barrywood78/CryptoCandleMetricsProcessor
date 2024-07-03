@@ -10,7 +10,7 @@ namespace CryptoCandleMetricsProcessor.Analysis
 {
     public static class TechnicalAnalysis
     {
-        public static async Task CalculateIndicatorsAsync(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
+        public static async Task CalculateIndicatorsAsync(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger, string granularity = "", string productId = "")
         {
             string connectionString = $"Data Source={Path.GetFullPath(dbFilePath)}";
             var groupedCandles = new Dictionary<(string ProductId, string Granularity), List<Quote>>();
@@ -31,39 +31,67 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 }
 
                 // Select and group candle data
-                string selectQuery = $"SELECT ProductId, Granularity, StartUnix, StartDate, Open, High, Low, Close, Volume FROM {tableName} ORDER BY ProductId, Granularity, StartUnix";
-                using (var command = new SqliteCommand(selectQuery, connection))
-                using (var reader = await command.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        var key = (ProductId: reader.GetString(0), Granularity: reader.GetString(1));
-                        if (!groupedCandles.ContainsKey(key))
-                        {
-                            groupedCandles[key] = new List<Quote>();
-                        }
+                string selectQuery = $@"
+                    SELECT ProductId, Granularity, StartUnix, StartDate, Open, High, Low, Close, Volume 
+                    FROM {tableName} 
+                    WHERE 1=1";  // This is to make it easier to append conditions
 
-                        groupedCandles[key].Add(new Quote
+                if (!string.IsNullOrEmpty(granularity))
+                {
+                    selectQuery += " AND Granularity = @Granularity";
+                }
+
+                if (!string.IsNullOrEmpty(productId))
+                {
+                    selectQuery += " AND ProductId = @ProductId";
+                }
+
+                selectQuery += " ORDER BY ProductId, Granularity, StartUnix";
+
+                using (var command = new SqliteCommand(selectQuery, connection))
+                {
+                    if (!string.IsNullOrEmpty(granularity))
+                    {
+                        command.Parameters.AddWithValue("@Granularity", granularity);
+                    }
+
+                    if (!string.IsNullOrEmpty(productId))
+                    {
+                        command.Parameters.AddWithValue("@ProductId", productId);
+                    }
+
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
                         {
-                            Date = reader.GetDateTime(3),
-                            Open = reader.GetDecimal(4),
-                            High = reader.GetDecimal(5),
-                            Low = reader.GetDecimal(6),
-                            Close = reader.GetDecimal(7),
-                            Volume = reader.GetDecimal(8)
-                        });
+                            var key = (ProductId: reader.GetString(0), Granularity: reader.GetString(1));
+                            if (!groupedCandles.ContainsKey(key))
+                            {
+                                groupedCandles[key] = new List<Quote>();
+                            }
+
+                            groupedCandles[key].Add(new Quote
+                            {
+                                Date = reader.GetDateTime(3),
+                                Open = reader.GetDecimal(4),
+                                High = reader.GetDecimal(5),
+                                Low = reader.GetDecimal(6),
+                                Close = reader.GetDecimal(7),
+                                Volume = reader.GetDecimal(8)
+                            });
+                        }
                     }
                 }
 
                 // Process indicators
                 foreach (var group in groupedCandles)
                 {
-                    var productId = group.Key.ProductId;
-                    var granularity = group.Key.Granularity;
+                    var groupProductId = group.Key.ProductId;
+                    var groupGranularity = group.Key.Granularity;
                     var candles = group.Value;
-                    var periods = GetPeriodsForGranularity(granularity);
+                    var periods = GetPeriodsForGranularity(groupGranularity);
 
-                    await ProcessIndicatorsAsync(connection, tableName, productId, granularity, candles, periods, logger);
+                    await ProcessIndicatorsAsync(connection, tableName, groupProductId, groupGranularity, candles, periods, logger);
                 }
 
                 // Process CandlePatternIndicator

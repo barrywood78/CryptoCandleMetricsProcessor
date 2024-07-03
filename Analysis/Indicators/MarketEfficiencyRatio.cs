@@ -17,13 +17,22 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 decimal netPriceChange = Math.Abs(candles[i].Close - candles[i - period].Close);
                 decimal sumPriceChanges = 0;
-
                 for (int j = i - period + 1; j <= i; j++)
                 {
                     sumPriceChanges += Math.Abs(candles[j].Close - candles[j - 1].Close);
                 }
 
-                decimal mer = netPriceChange / sumPriceChanges;
+                decimal mer;
+                if (sumPriceChanges == 0)
+                {
+                    // If sumPriceChanges is zero, it means all prices are identical
+                    // In this case, we can consider the market to be perfectly efficient
+                    mer = 1;
+                }
+                else
+                {
+                    mer = netPriceChange / sumPriceChanges;
+                }
 
                 string updateQuery = $@"
                 UPDATE {tableName}
