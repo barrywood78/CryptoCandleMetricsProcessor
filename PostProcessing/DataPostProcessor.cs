@@ -5,12 +5,14 @@ using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using SwiftLogger;
 using SwiftLogger.Enums;
+using System.Threading.Tasks.Dataflow;
 
 namespace CryptoCandleMetricsProcessor.PostProcessing
 {
     public static class DataPostProcessor
     {
         private const int BatchSize = 100000;
+        private static readonly object _logLock = new object();
 
         public static async Task ProcessDataAsync(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
         {
@@ -20,22 +22,20 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             {
                 await connection.OpenAsync();
 
-                //await CreateIndexesAndAnalyze(connection, tableName, logger);
-
                 var productGranularityPairs = await GetProductGranularityPairsAsync(connection, tableName);
-                await logger.Log(LogLevel.Information, $"Found {productGranularityPairs.Count} product-granularity pairs to process.");
+                await ThreadSafeLog(logger, LogLevel.Information, $"Found {productGranularityPairs.Count} product-granularity pairs to process.");
 
                 foreach (var pair in productGranularityPairs)
                 {
                     await ProcessProductGranularityAsync(connection, tableName, pair.ProductId, pair.Granularity, logger);
                 }
 
-                await logger.Log(LogLevel.Information, "All product-granularity pairs processed.");
+                await ThreadSafeLog(logger, LogLevel.Information, "All product-granularity pairs processed.");
 
                 await CheckRemainingNulls(connection, tableName, logger);
             }
 
-            await logger.Log(LogLevel.Information, "Post-processing completed successfully.");
+            await ThreadSafeLog(logger, LogLevel.Information, "Post-processing completed successfully.");
         }
 
         private static async Task<List<(string ProductId, string Granularity)>> GetProductGranularityPairsAsync(SqliteConnection connection, string tableName)
@@ -75,13 +75,13 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                     catch (Exception ex)
                     {
                         transaction.Rollback();
-                        await logger.Log(LogLevel.Error, $"Error processing {productId} - {granularity}: {ex.Message}");
+                        await ThreadSafeLog(logger, LogLevel.Error, $"Error processing {productId} - {granularity}: {ex.Message}");
                     }
                 }
             }
             catch (InvalidOperationException ex)
             {
-                await logger.Log(LogLevel.Error, $"Unable to process {productId} - {granularity}: {ex.Message}");
+                await ThreadSafeLog(logger, LogLevel.Error, $"Unable to process {productId} - {granularity}: {ex.Message}");
             }
         }
 
@@ -123,7 +123,7 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             }
             catch (Exception ex)
             {
-                await logger.Log(LogLevel.Error, $"Error processing batch for {productId} - {granularity} at offset {offset}: {ex.Message}");
+                await ThreadSafeLog(logger, LogLevel.Error, $"Error processing batch for {productId} - {granularity} at offset {offset}: {ex.Message}");
                 throw;
             }
         }
@@ -341,158 +341,174 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
 
         private static async Task CheckRemainingNulls(SqliteConnection connection, string tableName, SwiftLogger.SwiftLogger logger)
         {
-            var command = connection.CreateCommand();
-            command.CommandText = $@"
-                SELECT name, type
-                FROM pragma_table_info('{tableName}');";
+            await SetPragmaSettings(connection, logger);
 
-            var numericColumns = new List<string>();
-            var stringColumns = new List<string>();
-            using (var columnReader = await command.ExecuteReaderAsync())
+            var columns = await GetTableColumns(connection, tableName);
+            var productGranularityPairs = await GetProductGranularityPairsAsync(connection, tableName);
+
+            foreach (var pair in productGranularityPairs)
             {
-                while (await columnReader.ReadAsync())
-                {
-                    string columnName = columnReader.GetString(0);
-                    string columnType = columnReader.GetString(1);
+                await CheckAndBackfillNullsForPair(connection, tableName, pair.ProductId, pair.Granularity, columns, logger);
+            }
+        }
 
-                    if (columnType.ToUpper() == "TEXT")
-                    {
-                        stringColumns.Add(columnName);
-                    }
-                    else if (columnType.ToUpper() == "INTEGER" || columnType.ToUpper() == "REAL" || columnType.ToUpper() == "NUMERIC")
-                    {
-                        numericColumns.Add(columnName);
-                    }
+        private static async Task CheckAndBackfillNullsForPair(SqliteConnection connection, string tableName, string productId, string granularity, List<(string Name, string Type)> columns, SwiftLogger.SwiftLogger logger)
+        {
+            var command = connection.CreateCommand();
+            var nullCheckQueries = new List<string>();
+
+            foreach (var (columnName, columnType) in columns)
+            {
+                if (columnType.ToUpper() == "TEXT")
+                {
+                    nullCheckQueries.Add($"SUM(CASE WHEN {columnName} IS NULL OR {columnName} = '' THEN 1 ELSE 0 END) AS {columnName}_null_count");
+                }
+                else
+                {
+                    nullCheckQueries.Add($"SUM(CASE WHEN {columnName} IS NULL THEN 1 ELSE 0 END) AS {columnName}_null_count");
                 }
             }
 
-            var numericNullCheckQuery = string.Join(", ", numericColumns.Select(c => $"SUM(CASE WHEN {c} IS NULL THEN 1 ELSE 0 END) AS {c}_null_count"));
-            var stringNullCheckQuery = string.Join(", ", stringColumns.Select(c => $"SUM(CASE WHEN {c} IS NULL OR {c} = '' THEN 1 ELSE 0 END) AS {c}_null_count"));
-
-            command.CommandText = $"SELECT {numericNullCheckQuery}, {stringNullCheckQuery} FROM {tableName};";
+            var nullCheckQuery = string.Join(", ", nullCheckQueries);
+            command.CommandText = $"SELECT {nullCheckQuery} FROM {tableName} WHERE ProductId = @productId AND Granularity = @granularity;";
+            command.Parameters.AddWithValue("@productId", productId);
+            command.Parameters.AddWithValue("@granularity", granularity);
 
             using var nullCheckReader = await command.ExecuteReaderAsync();
             if (await nullCheckReader.ReadAsync())
             {
+                var columnsToBackfill = new List<(string Name, string Type)>();
                 for (int i = 0; i < nullCheckReader.FieldCount; i++)
                 {
                     var nullCount = nullCheckReader.GetInt64(i);
-                    var columnName = i < numericColumns.Count ? numericColumns[i] : stringColumns[i - numericColumns.Count];
+                    var columnName = columns[i].Name;
                     if (nullCount > 0)
                     {
-                        await logger.Log(LogLevel.Warning, $"Column {columnName} still has {nullCount} null or empty values.");
-                        await BackfillRemainingNulls(connection, tableName, columnName, logger);
+                        await ThreadSafeLog(logger, LogLevel.Warning, $"Column {columnName} has {nullCount} null or empty values for {productId} - {granularity}.");
+                        columnsToBackfill.Add(columns[i]);
                     }
                 }
+
+                if (columnsToBackfill.Any())
+                {
+                    await BackfillRemainingNulls(connection, tableName, productId, granularity, columnsToBackfill, logger);
+                }
             }
         }
 
-        private static async Task BackfillRemainingNulls(SqliteConnection connection, string tableName, string column, SwiftLogger.SwiftLogger logger)
+        private static async Task BackfillRemainingNulls(SqliteConnection connection, string tableName, string productId, string granularity, List<(string Name, string Type)> columnsToBackfill, SwiftLogger.SwiftLogger logger)
         {
-            var command = connection.CreateCommand();
-            command.CommandText = $"SELECT type FROM pragma_table_info('{tableName}') WHERE name = @columnName;";
-            command.Parameters.AddWithValue("@columnName", column);
+            var updateClauses = new List<string>();
 
-            var result = await command.ExecuteScalarAsync();
-
-            string columnType = "UNKNOWN";
-            if (result != null)
+            foreach (var (columnName, columnType) in columnsToBackfill)
             {
-                string? resultString = result.ToString();
-                if (resultString != null)
+                if (columnType.ToUpper() == "TEXT")
                 {
-                    columnType = resultString.ToUpper();
+                    updateClauses.Add($@"
+                    {columnName} = COALESCE(
+                        (SELECT t2.{columnName}
+                        FROM {tableName} t2
+                        WHERE t2.ProductId = {tableName}.ProductId
+                          AND t2.Granularity = {tableName}.Granularity
+                          AND t2.{columnName} IS NOT NULL
+                          AND t2.{columnName} != ''
+                          AND t2.Id > {tableName}.Id
+                        ORDER BY t2.Id
+                        LIMIT 1),
+                        CASE 
+                            WHEN '{columnName}' = 'SentimentCategory' THEN 'Neutral'
+                            WHEN '{columnName}' = 'MarketRegime' THEN 'Normal'
+                            WHEN '{columnName}' = 'PriceActionPattern' THEN 'Mixed'
+                            WHEN '{columnName}' = 'VolatilityRegime' THEN 'Medium'
+                            WHEN '{columnName}' = 'VolumeProfile' THEN 'Normal'
+                            ELSE ''
+                        END
+                    )");
+                    }
+                    else
+                    {
+                        updateClauses.Add($@"
+                    {columnName} = COALESCE(
+                        (SELECT t2.{columnName}
+                        FROM {tableName} t2
+                        WHERE t2.ProductId = {tableName}.ProductId
+                          AND t2.Granularity = {tableName}.Granularity
+                          AND t2.{columnName} IS NOT NULL
+                          AND t2.Id > {tableName}.Id
+                        ORDER BY t2.Id
+                        LIMIT 1),
+                        {columnName}
+                    )");
                 }
             }
 
-            if (columnType == "UNKNOWN")
-            {
-                await logger.Log(LogLevel.Error, $"Unable to determine type for column {column} in table {tableName}.");
-                return;
-            }
+            var updateQuery = $@"
+                UPDATE {tableName}
+                SET {string.Join(",", updateClauses)}
+                WHERE ProductId = @productId
+                  AND Granularity = @granularity
+                  AND ({string.Join(" OR ", columnsToBackfill.Select(c => c.Type.ToUpper() == "TEXT" ? $"({c.Name} IS NULL OR {c.Name} = '')" : $"{c.Name} IS NULL"))});";
 
-            string updateQuery;
-
-            if (columnType == "TEXT")
-            {
-                updateQuery = $@"
-                        UPDATE {tableName} AS t1
-                        SET {column} = COALESCE(
-                            (SELECT t2.{column}
-                            FROM {tableName} AS t2
-                            WHERE t2.ProductId = t1.ProductId
-                              AND t2.Granularity = t1.Granularity
-                              AND t2.{column} IS NOT NULL
-                              AND t2.{column} != ''
-                              AND t2.Id > t1.Id
-                            ORDER BY t2.Id
-                            LIMIT 1),
-                            CASE 
-                                WHEN '{column}' = 'SentimentCategory' THEN 'Neutral'
-                                WHEN '{column}' = 'MarketRegime' THEN 'Normal'
-                                WHEN '{column}' = 'PriceActionPattern' THEN 'Mixed'
-                                WHEN '{column}' = 'VolatilityRegime' THEN 'Medium'
-                                WHEN '{column}' = 'VolumeProfile' THEN 'Normal'
-                                ELSE ''
-                            END
-                        )
-                        WHERE {column} IS NULL OR {column} = '';";
-                        }
-                        else
-                        {
-                            updateQuery = $@"
-                        UPDATE {tableName} AS t1
-                        SET {column} = (
-                            SELECT t2.{column}
-                            FROM {tableName} AS t2
-                            WHERE t2.ProductId = t1.ProductId
-                              AND t2.Granularity = t1.Granularity
-                              AND t2.{column} IS NOT NULL
-                              AND t2.Id > t1.Id
-                            ORDER BY t2.Id
-                            LIMIT 1
-                        )
-                        WHERE {column} IS NULL;";
-            }
-
+            var command = connection.CreateCommand();
             command.CommandText = updateQuery;
+            command.Parameters.AddWithValue("@productId", productId);
+            command.Parameters.AddWithValue("@granularity", granularity);
+
             int rowsAffected = await command.ExecuteNonQueryAsync();
-            await logger.Log(LogLevel.Information, $"BackfillRemainingNulls: Updated {rowsAffected} rows for {column} with the nearest non-null value or default.");
+            await ThreadSafeLog(logger, LogLevel.Information, $"BackfillRemainingNulls: Updated {rowsAffected} rows for {productId} - {granularity}.");
         }
 
-        //private static async Task CreateIndexesAndAnalyze(SqliteConnection connection, string tableName, SwiftLogger.SwiftLogger logger)
-        //{
-        //    var indexCommands = new[]
-        //    {
-        //        $"CREATE INDEX IF NOT EXISTS idx_product_granularity ON {tableName} (ProductId, Granularity)",
-        //        $"CREATE INDEX IF NOT EXISTS idx_id ON {tableName} (Id)",
-        //        $"CREATE INDEX IF NOT EXISTS idx_start_unix ON {tableName} (StartUnix)",
-        //        $"CREATE INDEX IF NOT EXISTS idx_product_granularity_id ON {tableName} (ProductId, Granularity, Id)",
-        //        $"CREATE INDEX IF NOT EXISTS idx_close ON {tableName} (Close)",
-        //        $"CREATE INDEX IF NOT EXISTS idx_volume ON {tableName} (Volume)",
-        //        "ANALYZE"
-        //    };
+        private static async Task SetPragmaSettings(SqliteConnection connection, SwiftLogger.SwiftLogger logger)
+        {
+            var pragmaSettings = new[]
+            {
+                "PRAGMA journal_mode = WAL;",
+                "PRAGMA synchronous = NORMAL;",
+                "PRAGMA cache_size = -32000;", // 32MB cache
+                "PRAGMA temp_store = MEMORY;",
+                "PRAGMA mmap_size = 10000000000;", // 10GB (adjust based on available RAM)
+                "PRAGMA page_size = 32768;" // 32KB pages
+            };
 
-        //    foreach (var cmd in indexCommands)
-        //    {
-        //        using var command = connection.CreateCommand();
-        //        command.CommandText = cmd;
-        //        await command.ExecuteNonQueryAsync();
-        //        await logger.Log(LogLevel.Information, $"Executed: {cmd}");
-        //    }
+            foreach (var setting in pragmaSettings)
+            {
+                using var cmd = new SqliteCommand(setting, connection);
+                await cmd.ExecuteNonQueryAsync();
+                await ThreadSafeLog(logger, LogLevel.Information, $"Executed: {setting}");
+            }
+        }
 
-        //    await logger.Log(LogLevel.Information, "Indexes created and database analyzed.");
-        //}
+        private static async Task<List<(string Name, string Type)>> GetTableColumns(SqliteConnection connection, string tableName)
+        {
+            var columns = new List<(string Name, string Type)>();
+            var command = connection.CreateCommand();
+            command.CommandText = $"SELECT name, type FROM pragma_table_info('{tableName}');";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                columns.Add((reader.GetString(0), reader.GetString(1).ToUpper()));
+            }
+
+            return columns;
+        }
 
         private static async Task LogProgress(long processedRows, long totalRows, string productId, string granularity, SwiftLogger.SwiftLogger logger)
         {
-            // Ensure processedRows doesn't exceed totalRows
             long actualProcessedRows = Math.Min(processedRows, totalRows);
-
-            // Calculate percentage, capped at 100%
             double percentage = Math.Min((double)actualProcessedRows / totalRows * 100, 100);
+            await ThreadSafeLog(logger, LogLevel.Information, $"Processed {actualProcessedRows:N0} out of {totalRows:N0} rows ({percentage:F2}% complete) for {productId} - {granularity}");
+        }
 
-            await logger.Log(LogLevel.Information, $"Processed {actualProcessedRows:N0} out of {totalRows:N0} rows ({percentage:F2}% complete) for {productId} - {granularity}");
+        private static Task ThreadSafeLog(SwiftLogger.SwiftLogger logger, LogLevel level, string message)
+        {
+            return Task.Run(() =>
+            {
+                lock (_logLock)
+                {
+                    logger.Log(level, message).Wait();
+                }
+            });
         }
     }
 }
