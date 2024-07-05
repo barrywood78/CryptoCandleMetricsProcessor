@@ -1,12 +1,15 @@
 ﻿using Skender.Stock.Indicators;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class AdLineIndicator
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         /// <summary>
         /// Calculates the Accumulation/Distribution Line (ADL) indicator and updates the database.
         /// </summary>
@@ -21,25 +24,25 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Calculate ADL results using the Skender.Stock.Indicators library
             var adLineResults = candles.GetAdl().ToList();
 
-            // Iterate through each ADL result and update the database
-            for (int i = 0; i < adLineResults.Count; i++)
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET ADL = @ADL
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@ADL", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in adLineResults.Chunk(BatchSize))
             {
-                string updateQuery = $@"
-                    UPDATE {tableName}
-                    SET ADL = @ADL
-                    WHERE ProductId = @ProductId
-                      AND Granularity = @Granularity
-                      AND StartDate = @StartDate";
-
-                using (var command = new SqliteCommand(updateQuery, connection, transaction))
+                foreach (var result in batch)
                 {
-                    // Add parameters to the update command
-                    command.Parameters.AddWithValue("@ADL", adLineResults[i].Adl);
-                    command.Parameters.AddWithValue("@ProductId", productId);
-                    command.Parameters.AddWithValue("@Granularity", granularity);
-                    command.Parameters.AddWithValue("@StartDate", adLineResults[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                    // Execute the update command
+                    command.Parameters["@ADL"].Value = result.Adl;
+                    command.Parameters["@StartDate"].Value = result.Date.Ticks;
                     command.ExecuteNonQuery();
                 }
             }

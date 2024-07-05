@@ -16,9 +16,9 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
         {
             var closePrices = candles.Select(c => (double)c.Close).ToArray();
-            var dates = candles.Select(c => c.Date).ToArray();
+            var dates = candles.Select(c => c.Date.Ticks).ToArray();
 
-            var results = new Dictionary<DateTime, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)>();
+            var results = new Dictionary<long, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)>();
 
             Parallel.For(period - 1, closePrices.Length, i =>
             {
@@ -61,7 +61,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             }
         }
 
-        private static void UpdateDatabase(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, Dictionary<DateTime, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)> results)
+        private static void UpdateDatabase(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, Dictionary<long, (double? Mean, double? StdDev, double? Variance, double? Skewness, double? Kurtosis)> results)
         {
             string updateQuery = $@"
                 UPDATE {tableName}
@@ -72,7 +72,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     RollingKurtosis = @Kurtosis
                 WHERE ProductId = @ProductId
                   AND Granularity = @Granularity
-                  AND StartDate = @StartDate";
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
 
             using var command = new SqliteCommand(updateQuery, connection, transaction);
             command.Parameters.Add("@Mean", SqliteType.Real);
@@ -82,9 +82,12 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             command.Parameters.Add("@Kurtosis", SqliteType.Real);
             command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
             command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
-            command.Parameters.Add("@StartDate", SqliteType.Text);
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
 
-            foreach (var batch in results.Keys.Chunk(BatchSize))
+            foreach (var batch in results.Keys
+                .Select((value, index) => new { value, index })
+                .GroupBy(x => x.index / BatchSize)
+                .Select(group => group.Select(x => x.value).ToList()))
             {
                 foreach (var date in batch)
                 {
@@ -94,7 +97,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     command.Parameters["@Variance"].Value = variance.HasValue ? (object)variance.Value : DBNull.Value;
                     command.Parameters["@Skewness"].Value = skewness.HasValue ? (object)skewness.Value : DBNull.Value;
                     command.Parameters["@Kurtosis"].Value = kurtosis.HasValue ? (object)kurtosis.Value : DBNull.Value;
-                    command.Parameters["@StartDate"].Value = date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    command.Parameters["@StartDate"].Value = date;
 
                     command.ExecuteNonQuery();
                 }

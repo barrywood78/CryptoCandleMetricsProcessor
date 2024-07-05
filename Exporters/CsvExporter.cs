@@ -1,6 +1,8 @@
 ﻿using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Data.Sqlite;
+using SwiftLogger.Enums;
+using SwiftLogger;
 using System.Globalization;
 using System.IO;
 
@@ -15,7 +17,7 @@ namespace CryptoCandleMetricsProcessor.Exporters
         /// <param name="outputDirectory">The directory where the CSV files will be saved. If not specified, the executing assembly's location will be used.</param>
         /// <exception cref="ArgumentNullException">Thrown when the dbFilePath is null or empty.</exception>
         /// <exception cref="InvalidOperationException">Thrown when the output directory cannot be determined.</exception>
-        public static void ExportDatabaseToCsv(string dbFilePath, string outputDirectory = "")
+        public static async Task ExportDatabaseToCsvAsync(string dbFilePath, SwiftLogger.SwiftLogger logger,  string outputDirectory = "")
         {
             // Check if the database file path is provided
             if (string.IsNullOrEmpty(dbFilePath)) throw new ArgumentNullException(nameof(dbFilePath));
@@ -47,61 +49,72 @@ namespace CryptoCandleMetricsProcessor.Exporters
                         var granularity = reader.GetString(1);
 
                         // Export the data for each combination to a CSV file
-                        ExportProductGranularityToCsv(connection, productId, granularity, outputDirectory);
+                        await ExportProductGranularityToCsvAsync(connection, productId, granularity, outputDirectory, logger);
                     }
                 }
             }
         }
 
-        private static void ExportProductGranularityToCsv(SqliteConnection connection, string productId, string granularity, string outputDirectory)
+        private static async Task ExportProductGranularityToCsvAsync(SqliteConnection connection, string productId, string granularity, string outputDirectory, SwiftLogger.SwiftLogger logger)
         {
-            // Query to select all records for the specified ProductId and Granularity
-            string query = "SELECT * FROM Candles WHERE ProductId = @ProductId AND Granularity = @Granularity";
-            using (var command = new SqliteCommand(query, connection))
+            try
             {
-                // Add parameters to the query
-                command.Parameters.AddWithValue("@ProductId", productId);
-                command.Parameters.AddWithValue("@Granularity", granularity);
-
-                // Determine the output CSV file path
-                string outputCsvFilePath = Path.Combine(outputDirectory, $"Export_{productId}_{granularity}.csv");
-
-                // Execute the query and write the results to the CSV file
-                using (var reader = command.ExecuteReader())
-                using (var writer = new StreamWriter(outputCsvFilePath))
-                using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { HasHeaderRecord = true }))
+                // Query to select all records for the specified ProductId and Granularity
+                string query = "SELECT * FROM Candles WHERE ProductId = @ProductId AND Granularity = @Granularity";
+                using (var command = new SqliteCommand(query, connection))
                 {
-                    bool headerWritten = false;
+                    // Add parameters to the query
+                    command.Parameters.AddWithValue("@ProductId", productId);
+                    command.Parameters.AddWithValue("@Granularity", granularity);
 
-                    // Loop through each record in the result set
-                    while (reader.Read())
+                    // Determine the output CSV file path
+                    string outputCsvFilePath = Path.Combine(outputDirectory, $"Export_{productId}_{granularity}.csv");
+
+                    // Execute the query and write the results to the CSV file
+                    using (var reader = command.ExecuteReader())
+                    using (var writer = new StreamWriter(outputCsvFilePath))
+                    using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { HasHeaderRecord = true }))
                     {
-                        // Write the header row if it hasn't been written yet
-                        if (!headerWritten)
+                        bool headerWritten = false;
+
+                        // Loop through each record in the result set
+                        while (reader.Read())
                         {
+                            // Write the header row if it hasn't been written yet
+                            if (!headerWritten)
+                            {
+                                for (int i = 0; i < reader.FieldCount; i++)
+                                {
+                                    if (reader.GetName(i) != "Id") // Skip the "Id" field
+                                    {
+                                        csv.WriteField(reader.GetName(i));
+                                    }
+                                }
+                                csv.NextRecord();
+                                headerWritten = true;
+                            }
+
+                            // Write the data row
                             for (int i = 0; i < reader.FieldCount; i++)
                             {
                                 if (reader.GetName(i) != "Id") // Skip the "Id" field
                                 {
-                                    csv.WriteField(reader.GetName(i));
+                                    csv.WriteField(reader[i]);
                                 }
                             }
                             csv.NextRecord();
-                            headerWritten = true;
                         }
-
-                        // Write the data row
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            if (reader.GetName(i) != "Id") // Skip the "Id" field
-                            {
-                                csv.WriteField(reader[i]);
-                            }
-                        }
-                        csv.NextRecord();
                     }
                 }
+                await logger.Log(LogLevel.Information, $"Export_{productId}_{granularity}.csv exported successfully");
             }
+            catch (Exception ex)
+            {
+                await logger.Log(LogLevel.Error, $"Export_{productId}_{granularity}.csv did not export successfully: {ex.Message}");
+                throw;
+            }
+            
+            
         }
     }
 }

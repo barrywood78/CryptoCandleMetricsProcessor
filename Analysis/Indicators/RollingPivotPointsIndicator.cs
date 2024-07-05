@@ -1,12 +1,15 @@
 ﻿using Skender.Stock.Indicators;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class RollingPivotPointsIndicator
     {
+        private const int BatchSize = 50000;
+
         /// <summary>
         /// Calculates the rolling pivot points indicator and updates the database.
         /// </summary>
@@ -24,41 +27,67 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Calculate rolling pivot points results using the Skender.Stock.Indicators library
             var rollingPivotPointsResults = candles.GetRollingPivots(windowPeriods, offsetPeriods, pointType).ToList();
 
-            // Iterate through each rolling pivot point result and update the database
+            var pivotPointsResults = new List<(long DateTicks, decimal? PP, decimal? R1, decimal? R2, decimal? R3, decimal? S1, decimal? S2, decimal? S3)>();
+
+            // Prepare results for batch update
             for (int i = 0; i < rollingPivotPointsResults.Count; i++)
             {
                 if (rollingPivotPointsResults[i].PP != null) // Only update if Pivot Point value is not null
                 {
-                    string updateQuery = $@"
-                        UPDATE {tableName}
-                        SET PivotPoint = @Pivot,
-                            Resistance1 = @Resistance1,
-                            Resistance2 = @Resistance2,
-                            Resistance3 = @Resistance3,
-                            Support1 = @Support1,
-                            Support2 = @Support2,
-                            Support3 = @Support3
-                        WHERE ProductId = @ProductId
-                          AND Granularity = @Granularity
-                          AND StartDate = @StartDate";
+                    pivotPointsResults.Add((
+                        rollingPivotPointsResults[i].Date.Ticks,
+                        rollingPivotPointsResults[i].PP,
+                        rollingPivotPointsResults[i].R1,
+                        rollingPivotPointsResults[i].R2,
+                        rollingPivotPointsResults[i].R3,
+                        rollingPivotPointsResults[i].S1,
+                        rollingPivotPointsResults[i].S2,
+                        rollingPivotPointsResults[i].S3
+                    ));
+                }
+            }
 
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        // Add parameters to the update command
-                        command.Parameters.AddWithValue("@Pivot", rollingPivotPointsResults[i].PP);
-                        command.Parameters.AddWithValue("@Resistance1", rollingPivotPointsResults[i].R1);
-                        command.Parameters.AddWithValue("@Resistance2", rollingPivotPointsResults[i].R2);
-                        command.Parameters.AddWithValue("@Resistance3", rollingPivotPointsResults[i].R3);
-                        command.Parameters.AddWithValue("@Support1", rollingPivotPointsResults[i].S1);
-                        command.Parameters.AddWithValue("@Support2", rollingPivotPointsResults[i].S2);
-                        command.Parameters.AddWithValue("@Support3", rollingPivotPointsResults[i].S3);
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", rollingPivotPointsResults[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET PivotPoint = @Pivot,
+                    Resistance1 = @Resistance1,
+                    Resistance2 = @Resistance2,
+                    Resistance3 = @Resistance3,
+                    Support1 = @Support1,
+                    Support2 = @Support2,
+                    Support3 = @Support3
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
 
-                        // Execute the update command
-                        command.ExecuteNonQuery();
-                    }
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@Pivot", SqliteType.Real);
+            command.Parameters.Add("@Resistance1", SqliteType.Real);
+            command.Parameters.Add("@Resistance2", SqliteType.Real);
+            command.Parameters.Add("@Resistance3", SqliteType.Real);
+            command.Parameters.Add("@Support1", SqliteType.Real);
+            command.Parameters.Add("@Support2", SqliteType.Real);
+            command.Parameters.Add("@Support3", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in pivotPointsResults
+                .Select((value, index) => new { value, index })
+                .GroupBy(x => x.index / BatchSize)
+                .Select(group => group.Select(x => x.value).ToList()))
+            {
+                foreach (var result in batch)
+                {
+                    command.Parameters["@Pivot"].Value = result.PP ?? (object)DBNull.Value;
+                    command.Parameters["@Resistance1"].Value = result.R1 ?? (object)DBNull.Value;
+                    command.Parameters["@Resistance2"].Value = result.R2 ?? (object)DBNull.Value;
+                    command.Parameters["@Resistance3"].Value = result.R3 ?? (object)DBNull.Value;
+                    command.Parameters["@Support1"].Value = result.S1 ?? (object)DBNull.Value;
+                    command.Parameters["@Support2"].Value = result.S2 ?? (object)DBNull.Value;
+                    command.Parameters["@Support3"].Value = result.S3 ?? (object)DBNull.Value;
+                    command.Parameters["@StartDate"].Value = result.DateTicks;
+                    command.ExecuteNonQuery();
                 }
             }
         }

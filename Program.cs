@@ -20,7 +20,7 @@ namespace CryptoCandleMetricsProcessor
 
             var consoleConfig = new ConsoleLoggerConfig()
                 .SetColorForLogLevel(LogLevel.Error, ConsoleColor.Red)
-                .SetColorForLogLevel(LogLevel.Warning, ConsoleColor.Green)
+                .SetColorForLogLevel(LogLevel.Warning, ConsoleColor.Yellow)
                 .SetMinimumLogLevel(LogLevel.Information);
 
             var fileConfig = new FileLoggerConfig()
@@ -116,7 +116,7 @@ namespace CryptoCandleMetricsProcessor
 
                     case "6":
                         await logger.Log(LogLevel.Information, "Exporting database to CSV.");
-                        CsvExporter.ExportDatabaseToCsv(dbFilePath);
+                        await CsvExporter.ExportDatabaseToCsvAsync(dbFilePath, logger);
                         await logger.Log(LogLevel.Information, "CSV data exported successfully.");
                         break;
 

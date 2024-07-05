@@ -1,12 +1,15 @@
 ﻿using Skender.Stock.Indicators;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class CmfIndicator
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         /// <summary>
         /// Calculates the Chaikin Money Flow (CMF) indicator and updates the database.
         /// </summary>
@@ -19,32 +22,36 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         /// <param name="period">The period to use for the CMF calculation.</param>
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
         {
-            // Calculate CMF results using the Skender.Stock.Indicators library
-            var cmfResults = candles.GetCmf(period).ToList();
+            var cmfResults = candles.GetCmf(period)
+                                    .Where(r => r.Cmf.HasValue)
+                                    .Select(r => (DateTicks: r.Date.Ticks, Cmf: r.Cmf.Value))
+                                    .ToList();
 
-            // Iterate through each CMF result and update the database
-            for (int i = 0; i < cmfResults.Count; i++)
+            UpdateCmfValues(connection, transaction, tableName, productId, granularity, cmfResults);
+        }
+
+        private static void UpdateCmfValues(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<(long DateTicks, double Cmf)> cmfResults)
+        {
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET CMF = @CMF
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@CMF", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in cmfResults.Chunk(BatchSize))
             {
-                if (cmfResults[i].Cmf != null) // Only update if CMF value is not null
+                foreach (var (dateTicks, cmf) in batch)
                 {
-                    string updateQuery = $@"
-                        UPDATE {tableName}
-                        SET CMF = @CMF
-                        WHERE ProductId = @ProductId
-                          AND Granularity = @Granularity
-                          AND StartDate = @StartDate";
-
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        // Add parameters to the update command
-                        command.Parameters.AddWithValue("@CMF", cmfResults[i].Cmf);
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", cmfResults[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                        // Execute the update command
-                        command.ExecuteNonQuery();
-                    }
+                    command.Parameters["@CMF"].Value = cmf;
+                    command.Parameters["@StartDate"].Value = dateTicks;
+                    command.ExecuteNonQuery();
                 }
             }
         }

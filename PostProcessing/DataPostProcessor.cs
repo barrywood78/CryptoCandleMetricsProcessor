@@ -10,6 +10,8 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
 {
     public static class DataPostProcessor
     {
+        private const int BatchSize = 100000;
+
         public static async Task ProcessDataAsync(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
         {
             string connectionString = $"Data Source={System.IO.Path.GetFullPath(dbFilePath)}";
@@ -18,13 +20,19 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             {
                 await connection.OpenAsync();
 
+                await CreateIndexesAndAnalyze(connection, tableName, logger);
+
                 var productGranularityPairs = await GetProductGranularityPairsAsync(connection, tableName);
                 await logger.Log(LogLevel.Information, $"Found {productGranularityPairs.Count} product-granularity pairs to process.");
 
-                var tasks = productGranularityPairs.Select(pair => ProcessPairAsync(connectionString, tableName, pair.ProductId, pair.Granularity, logger)).ToArray();
-                await Task.WhenAll(tasks);
+                foreach (var pair in productGranularityPairs)
+                {
+                    await ProcessProductGranularityAsync(connection, tableName, pair.ProductId, pair.Granularity, logger);
+                }
 
-                await CheckRemainingNulls(connectionString, tableName, logger);
+                await logger.Log(LogLevel.Information, "All product-granularity pairs processed.");
+
+                await CheckRemainingNulls(connection, tableName, logger);
             }
 
             await logger.Log(LogLevel.Information, "Post-processing completed successfully.");
@@ -47,145 +55,157 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             return pairs;
         }
 
-        private static async Task ProcessPairAsync(string connectionString, string tableName, string productId, string granularity, SwiftLogger.SwiftLogger logger)
+        private static async Task ProcessProductGranularityAsync(SqliteConnection connection, string tableName, string productId, string granularity, SwiftLogger.SwiftLogger logger)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            long totalRows = await GetTotalRowCount(connection, tableName, productId, granularity);
+
+            using (var transaction = connection.BeginTransaction())
             {
-                await connection.OpenAsync();
-
-                using (var transaction = connection.BeginTransaction())
+                try
                 {
-                    try
+                    for (long offset = 0; offset < totalRows; offset += BatchSize)
                     {
-                        var tasks = new List<Task>
-                        {
-                            BackfillFields(connection, tableName, productId, granularity, new[]
-                            {
-                                "SMA", "EMA", "ATR", "TEMA", "BB_SMA", "BB_UpperBand", "BB_LowerBand",
-                                "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
-                                "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
-                                "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
-                                "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
-                                "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel"
-                            }),
-
-                            FillWithNeutralValue(connection, tableName, productId, granularity, new[]
-                            {
-                                "RSI", "ADX", "BB_PercentB", "Stoch_K", "Stoch_D", "WilliamsR", "CMF", "CCI"
-                            }, 50),
-
-                            FillWithValue(connection, tableName, productId, granularity, new[]
-                            {
-                                "PriceUpStreak", "BuyScore", "BB_ZScore", "BB_Width", "MACD_Histogram",
-                                "PriceChangePercent", "VolumeChangePercent", "ATRPercent", "RSIChange",
-                                "MACDHistogramSlope", "DistanceToNearestSupport", "DistanceToNearestResistance",
-                                "DistanceToDynamicSupport", "DistanceToDynamicResistance", "ADLChange"
-                            }, 0),
-
-                            FillBooleanFields(connection, tableName, productId, granularity, new[]
-                            {
-                                "PriceUp", "IsUptrend", "IsBullishCyclePhase"
-                            }, false),
-
-                            FillCategoricalFields(connection, tableName, productId, granularity),
-
-                            BackfillLaggedFields(connection, tableName, productId, granularity, new[]
-                            {
-                                "Lagged_Close", "Lagged_RSI", "Lagged_Return", "Lagged_EMA", "Lagged_ATR",
-                                "Lagged_MACD", "Lagged_BollingerUpper", "Lagged_BollingerLower",
-                                "Lagged_BollingerPercentB", "Lagged_StochK", "Lagged_StochD"
-                            }),
-
-                            FillSpecificFields(connection, tableName, productId, granularity)
-                        };
-
-                        await Task.WhenAll(tasks);
-
-                        transaction.Commit();
-                        await logger.Log(LogLevel.Information, $"Processed data for {productId} - {granularity}");
+                        await ProcessBatchAsync(connection, transaction, tableName, productId, granularity, offset, BatchSize, logger);
+                        await LogProgress(offset + BatchSize, totalRows, productId, granularity, logger);
                     }
-                    catch (Exception ex)
-                    {
-                        transaction.Rollback();
-                        await logger.Log(LogLevel.Error, $"Error processing data for {productId} - {granularity}: {ex.Message}");
-                    }
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    await logger.Log(LogLevel.Error, $"Error processing {productId} - {granularity}: {ex.Message}");
                 }
             }
         }
 
-        private static async Task BackfillFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields)
+        private static async Task<long> GetTotalRowCount(SqliteConnection connection, string tableName, string productId, string granularity)
         {
-            var tasks = fields.Select(field =>
+            var command = connection.CreateCommand();
+            command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE ProductId = @productId AND Granularity = @granularity";
+            command.Parameters.AddWithValue("@productId", productId);
+            command.Parameters.AddWithValue("@granularity", granularity);
+            return (long)await command.ExecuteScalarAsync();
+        }
+
+        private static async Task ProcessBatchAsync(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize, SwiftLogger.SwiftLogger logger)
+        {
+            try
+            {
+                await BackfillFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await FillWithNeutralValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await FillBooleanFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await FillCategoricalFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await BackfillLaggedFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await FillSpecificFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+            }
+            catch (Exception ex)
+            {
+                await logger.Log(LogLevel.Error, $"Error processing batch for {productId} - {granularity} at offset {offset}: {ex.Message}");
+                throw;
+            }
+        }
+
+        private static async Task BackfillFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
+        {
+            var fields = new[] { "SMA", "EMA", "ATR", "TEMA", "BB_SMA", "BB_UpperBand", "BB_LowerBand",
+                                 "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
+                                 "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
+                                 "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
+                                 "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
+                                 "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel" };
+
+            foreach (var field in fields)
             {
                 var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = $@"
-                    WITH first_non_null AS (
-                        SELECT MIN(RowId) as FirstNonNullRowId, {field} as FirstNonNullValue
-                        FROM {tableName}
-                        WHERE ProductId = @productId AND Granularity = @granularity AND {field} IS NOT NULL
-                    )
                     UPDATE {tableName}
-                    SET {field} = (SELECT FirstNonNullValue FROM first_non_null)
-                    WHERE ProductId = @productId 
-                      AND Granularity = @granularity 
-                      AND {field} IS NULL 
-                      AND RowId < (SELECT FirstNonNullRowId FROM first_non_null);";
+                    SET {field} = (
+                        SELECT {field}
+                        FROM {tableName} AS t2
+                        WHERE t2.ProductId = @productId
+                          AND t2.Granularity = @granularity
+                          AND t2.{field} IS NOT NULL
+                          AND t2.Id <= {tableName}.Id
+                          AND t2.Id BETWEEN @offset AND @endOffset
+                        ORDER BY t2.Id DESC
+                        LIMIT 1
+                    )
+                    WHERE ProductId = @productId
+                      AND Granularity = @granularity
+                      AND {field} IS NULL
+                      AND Id BETWEEN @offset AND @endOffset";
 
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
+                command.Parameters.AddWithValue("@offset", offset);
+                command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
-                return command.ExecuteNonQueryAsync();
-            });
-
-            await Task.WhenAll(tasks);
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        private static async Task FillWithNeutralValue(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, double neutralValue)
+        private static async Task FillWithNeutralValueInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
         {
-            await FillWithValue(connection, tableName, productId, granularity, fields, neutralValue);
+            var fields = new[] { "RSI", "ADX", "BB_PercentB", "Stoch_K", "Stoch_D", "WilliamsR", "CMF", "CCI" };
+            await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, fields, 50);
         }
 
-        private static async Task FillWithValue(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, double value)
+        private static async Task FillWithValueInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize, string[] fields = null, double value = 0)
         {
-            var tasks = fields.Select(field =>
+            fields = fields ?? new[] { "PriceUp", "PriceUpStreak", "BuyScore", "BB_ZScore", "BB_Width", "MACD_Histogram",
+                                       "PriceChangePercent", "VolumeChangePercent", "ATRPercent", "RSIChange",
+                                       "MACDHistogramSlope", "DistanceToNearestSupport", "DistanceToNearestResistance",
+                                       "DistanceToDynamicSupport", "DistanceToDynamicResistance", "ADLChange" };
+
+            foreach (var field in fields)
             {
                 var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = $@"
                     UPDATE {tableName}
                     SET {field} = @value
-                    WHERE ProductId = @productId AND Granularity = @granularity AND {field} IS NULL;";
+                    WHERE ProductId = @productId
+                      AND Granularity = @granularity
+                      AND {field} IS NULL
+                      AND Id BETWEEN @offset AND @endOffset";
 
                 command.Parameters.AddWithValue("@value", value);
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
+                command.Parameters.AddWithValue("@offset", offset);
+                command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
-                return command.ExecuteNonQueryAsync();
-            });
-
-            await Task.WhenAll(tasks);
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        private static async Task FillBooleanFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] fields, bool defaultValue)
+        private static async Task FillBooleanFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
         {
-            var tasks = fields.Select(field =>
+            var fields = new[] { "PriceUp", "IsUptrend", "IsBullishCyclePhase" };
+            foreach (var field in fields)
             {
                 var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = $@"
                     UPDATE {tableName}
-                    SET {field} = @defaultValue
-                    WHERE ProductId = @productId AND Granularity = @granularity AND {field} IS NULL;";
+                    SET {field} = 0
+                    WHERE ProductId = @productId
+                      AND Granularity = @granularity
+                      AND {field} IS NULL
+                      AND Id BETWEEN @offset AND @endOffset";
 
-                command.Parameters.AddWithValue("@defaultValue", defaultValue ? 1 : 0);
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
+                command.Parameters.AddWithValue("@offset", offset);
+                command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
-                return command.ExecuteNonQueryAsync();
-            });
-
-            await Task.WhenAll(tasks);
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        private static async Task FillCategoricalFields(SqliteConnection connection, string tableName, string productId, string granularity)
+        private static async Task FillCategoricalFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
         {
             var categoricalFields = new Dictionary<string, string>
             {
@@ -195,116 +215,145 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 { "VolatilityRegime", "Normal" }
             };
 
-            var tasks = categoricalFields.Select(field =>
+            foreach (var field in categoricalFields)
             {
                 var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = $@"
                     UPDATE {tableName}
                     SET {field.Key} = @defaultValue
-                    WHERE ProductId = @productId AND Granularity = @granularity AND {field.Key} IS NULL;";
+                    WHERE ProductId = @productId
+                      AND Granularity = @granularity
+                      AND {field.Key} IS NULL
+                      AND Id BETWEEN @offset AND @endOffset";
 
                 command.Parameters.AddWithValue("@defaultValue", field.Value);
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
+                command.Parameters.AddWithValue("@offset", offset);
+                command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
-                return command.ExecuteNonQueryAsync();
-            });
-
-            await Task.WhenAll(tasks);
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        private static async Task BackfillLaggedFields(SqliteConnection connection, string tableName, string productId, string granularity, string[] baseFields)
+        private static async Task BackfillLaggedFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
         {
-            var tasks = baseFields.SelectMany(baseField =>
-                Enumerable.Range(1, 3).Select(i =>
-                {
-                    var field = $"{baseField}_{i}";
-                    return BackfillFields(connection, tableName, productId, granularity, new[] { field });
-                })
-            );
-
-            await Task.WhenAll(tasks);
-        }
-
-        private static async Task FillSpecificFields(SqliteConnection connection, string tableName, string productId, string granularity)
-        {
-            var tasks = new List<Task>
+            var laggedFields = new[]
             {
-                CalculateDayOfWeek(connection, tableName, productId, granularity),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "RelativeVolume", "VolumeProfile" }, 1),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "MACDCrossover", "EMACrossover" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "CycleDominantPeriod", "CyclePhase" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "FractalDimension", "HurstExponent", "MarketEfficiencyRatio" }, 0.5),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "MarketVolatility", "OrderFlowImbalance" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergence", "MACDDivergence" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "RSIDivergenceStrength" }, 0),
-
-                FillWithValue(connection, tableName, productId, granularity, new[] { "HistoricalVolatility", "ROC_5", "ROC_10" }, 0)
+                "Lagged_Close_1", "Lagged_Close_2", "Lagged_Close_3",
+                "Lagged_RSI_1", "Lagged_RSI_2", "Lagged_RSI_3",
+                "Lagged_Return_1", "Lagged_Return_2", "Lagged_Return_3",
+                "Lagged_EMA_1", "Lagged_EMA_2", "Lagged_EMA_3",
+                "Lagged_ATR_1", "Lagged_ATR_2", "Lagged_ATR_3",
+                "Lagged_MACD_1", "Lagged_MACD_2", "Lagged_MACD_3",
+                "Lagged_BollingerUpper_1", "Lagged_BollingerUpper_2", "Lagged_BollingerUpper_3",
+                "Lagged_BollingerLower_1", "Lagged_BollingerLower_2", "Lagged_BollingerLower_3",
+                "Lagged_BollingerPercentB_1", "Lagged_BollingerPercentB_2", "Lagged_BollingerPercentB_3",
+                "Lagged_StochK_1", "Lagged_StochK_2", "Lagged_StochK_3",
+                "Lagged_StochD_1", "Lagged_StochD_2", "Lagged_StochD_3"
             };
 
-            await Task.WhenAll(tasks);
+            foreach (var laggedField in laggedFields)
+            {
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = $@"
+                    UPDATE {tableName}
+                    SET {laggedField} = (
+                        SELECT {laggedField}
+                        FROM {tableName} AS t2
+                        WHERE t2.ProductId = @productId
+                          AND t2.Granularity = @granularity
+                          AND t2.Id < {tableName}.Id
+                          AND t2.Id BETWEEN @offset AND @endOffset
+                          AND t2.{laggedField} IS NOT NULL
+                        ORDER BY t2.Id DESC
+                        LIMIT 1
+                    )
+                    WHERE ProductId = @productId
+                      AND Granularity = @granularity
+                      AND {laggedField} IS NULL
+                      AND Id BETWEEN @offset AND @endOffset";
+
+                command.Parameters.AddWithValue("@productId", productId);
+                command.Parameters.AddWithValue("@granularity", granularity);
+                command.Parameters.AddWithValue("@offset", offset);
+                command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
+
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        private static async Task CalculateDayOfWeek(SqliteConnection connection, string tableName, string productId, string granularity)
+        private static async Task FillSpecificFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
+        {
+            await CalculateDayOfWeekInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+
+            var defaultOneFields = new[] { "RelativeVolume", "VolumeProfile" };
+            await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, defaultOneFields, 1);
+
+            var defaultZeroFields = new[] { "PriceUp", "PriceUpStreak", "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum",
+                                            "MACDCrossover", "EMACrossover", "CycleDominantPeriod", "CyclePhase",
+                                            "MarketVolatility", "OrderFlowImbalance", "RSIDivergence", "MACDDivergence",
+                                            "RSIDivergenceStrength", "HistoricalVolatility", "ROC_5", "ROC_10" };
+            await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, defaultZeroFields, 0);
+
+            var defaultHalfFields = new[] { "FractalDimension", "HurstExponent", "MarketEfficiencyRatio" };
+            await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, defaultHalfFields, 0.5);
+        }
+
+        private static async Task CalculateDayOfWeekInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
         {
             var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = $@"
                 UPDATE {tableName}
                 SET DayOfWeek = CAST(strftime('%w', StartDate) AS INTEGER) + 1
-                WHERE ProductId = @productId AND Granularity = @granularity;";
+                WHERE ProductId = @productId 
+                  AND Granularity = @granularity
+                  AND Id BETWEEN @offset AND @endOffset;";
 
             command.Parameters.AddWithValue("@productId", productId);
             command.Parameters.AddWithValue("@granularity", granularity);
+            command.Parameters.AddWithValue("@offset", offset);
+            command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
             await command.ExecuteNonQueryAsync();
         }
 
-        private static async Task CheckRemainingNulls(string connectionString, string tableName, SwiftLogger.SwiftLogger logger)
+        private static async Task CheckRemainingNulls(SqliteConnection connection, string tableName, SwiftLogger.SwiftLogger logger)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            var command = connection.CreateCommand();
+            command.CommandText = $@"
+                SELECT name 
+                FROM pragma_table_info('{tableName}')
+                WHERE type IN ('INTEGER', 'REAL', 'NUMERIC');";
+
+            var numericColumns = new List<string>();
+            using (var columnReader = await command.ExecuteReaderAsync())
             {
-                await connection.OpenAsync();
-
-                var command = connection.CreateCommand();
-                command.CommandText = $@"
-                    SELECT name FROM pragma_table_info('{tableName}')
-                    WHERE type LIKE 'INTEGER' OR type LIKE 'REAL' OR type LIKE 'NUMERIC';";
-
-                var numericColumns = new List<string>();
-                using (var reader = await command.ExecuteReaderAsync())
+                while (await columnReader.ReadAsync())
                 {
-                    while (await reader.ReadAsync())
-                    {
-                        numericColumns.Add(reader.GetString(0));
-                    }
+                    numericColumns.Add(columnReader.GetString(0));
                 }
+            }
 
-                var tasks = numericColumns.Select(async column =>
+            var nullCheckQuery = string.Join(", ", numericColumns.Select(c => $"SUM(CASE WHEN {c} IS NULL THEN 1 ELSE 0 END) AS {c}_null_count"));
+            command.CommandText = $"SELECT {nullCheckQuery} FROM {tableName};";
+
+            using var nullCheckReader = await command.ExecuteReaderAsync();
+            if (await nullCheckReader.ReadAsync())
+            {
+                for (int i = 0; i < nullCheckReader.FieldCount; i++)
                 {
-                    command = connection.CreateCommand();
-                    command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE {column} IS NULL;";
-                    long nullCount = (long)(await command.ExecuteScalarAsync() ?? 0L);
-
-
+                    var nullCount = nullCheckReader.GetInt64(i);
+                    var columnName = numericColumns[i];
                     if (nullCount > 0)
                     {
-                        await logger.Log(LogLevel.Warning, $"Column {column} still has {nullCount} null values.");
-
-                        // Backfill remaining nulls based on the next non-null value
-                        await BackfillRemainingNulls(connection, tableName, column, logger);
+                        await logger.Log(LogLevel.Warning, $"Column {columnName} still has {nullCount} null values.");
+                        await BackfillRemainingNulls(connection, tableName, columnName, logger);
                     }
-                });
-
-                await Task.WhenAll(tasks);
+                }
             }
         }
 
@@ -312,16 +361,56 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
         {
             var command = connection.CreateCommand();
             command.CommandText = $@"
-                WITH next_non_null AS (
-                    SELECT RowId, LEAD({column}) OVER (ORDER BY RowId) as NextNonNullValue
-                    FROM {tableName}
+                UPDATE {tableName} AS t1
+                SET {column} = (
+                    SELECT t2.{column}
+                    FROM {tableName} AS t2
+                    WHERE t2.ProductId = t1.ProductId
+                      AND t2.Granularity = t1.Granularity
+                      AND t2.{column} IS NOT NULL
+                      AND t2.Id > t1.Id
+                    ORDER BY t2.Id
+                    LIMIT 1
                 )
-                UPDATE {tableName}
-                SET {column} = (SELECT NextNonNullValue FROM next_non_null WHERE {tableName}.RowId = next_non_null.RowId)
                 WHERE {column} IS NULL;";
 
             int rowsAffected = await command.ExecuteNonQueryAsync();
-            await logger.Log(LogLevel.Information, $"BackfillRemainingNulls: Updated {rowsAffected} rows for {column} with the next non-null value.");
+            await logger.Log(LogLevel.Information, $"BackfillRemainingNulls: Updated {rowsAffected} rows for {column} with the nearest non-null value.");
+        }
+
+        private static async Task CreateIndexesAndAnalyze(SqliteConnection connection, string tableName, SwiftLogger.SwiftLogger logger)
+        {
+            var indexCommands = new[]
+            {
+                $"CREATE INDEX IF NOT EXISTS idx_product_granularity ON {tableName} (ProductId, Granularity)",
+                $"CREATE INDEX IF NOT EXISTS idx_id ON {tableName} (Id)",
+                $"CREATE INDEX IF NOT EXISTS idx_start_unix ON {tableName} (StartUnix)",
+                $"CREATE INDEX IF NOT EXISTS idx_product_granularity_id ON {tableName} (ProductId, Granularity, Id)",
+                $"CREATE INDEX IF NOT EXISTS idx_close ON {tableName} (Close)",
+                $"CREATE INDEX IF NOT EXISTS idx_volume ON {tableName} (Volume)",
+                "ANALYZE"
+            };
+
+            foreach (var cmd in indexCommands)
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = cmd;
+                await command.ExecuteNonQueryAsync();
+                await logger.Log(LogLevel.Information, $"Executed: {cmd}");
+            }
+
+            await logger.Log(LogLevel.Information, "Indexes created and database analyzed.");
+        }
+
+        private static async Task LogProgress(long processedRows, long totalRows, string productId, string granularity, SwiftLogger.SwiftLogger logger)
+        {
+            // Ensure processedRows doesn't exceed totalRows
+            long actualProcessedRows = Math.Min(processedRows, totalRows);
+
+            // Calculate percentage, capped at 100%
+            double percentage = Math.Min((double)actualProcessedRows / totalRows * 100, 100);
+
+            await logger.Log(LogLevel.Information, $"Processed {actualProcessedRows:N0} out of {totalRows:N0} rows ({percentage:F2}% complete) for {productId} - {granularity}");
         }
     }
 }

@@ -342,7 +342,6 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 {"LaggedFeatures", (conn, trans, table, prod, gran, c, p) => LaggedFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"ADLChange", (conn, trans, table, prod, gran, c, p) => ADLChangeIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"ATRPercent", (conn, trans, table, prod, gran, c, p) => ATRPercentIndicator.Calculate(conn, trans, table, prod, gran, c, p["ATR"])},
-                {"CompositeMarketSentiment", (conn, trans, table, prod, gran, c, p) => CompositeMarketSentimentIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"CompositeMomentum", (conn, trans, table, prod, gran, c, p) => CompositeMomentumIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"CrossoverFeatures", (conn, trans, table, prod, gran, c, p) => CrossoverFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"CyclicalPatterns", (conn, trans, table, prod, gran, c, p) => CyclicalPatternsIndicator.Calculate(conn, trans, table, prod, gran, c)},
@@ -367,7 +366,8 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 {"TrendStrength", (conn, trans, table, prod, gran, c, p) => TrendStrengthIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"VolatilityRegime", (conn, trans, table, prod, gran, c, p) => VolatilityRegime.Calculate(conn, trans, table, prod, gran, c)},
                 {"VolumeChangePercent", (conn, trans, table, prod, gran, c, p) => VolumeChangePercentIndicator.Calculate(conn, trans, table, prod, gran, c)},
-                {"VWAP", (conn, trans, table, prod, gran, c, p) => VWAPIndicator.Calculate(conn, trans, table, prod, gran, c)}
+                {"VWAP", (conn, trans, table, prod, gran, c, p) => VWAPIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                {"CompositeMarketSentiment", (conn, trans, table, prod, gran, c, p) => CompositeMarketSentimentIndicator.Calculate(conn, trans, table, prod, gran, c)}
             };
         }
     }

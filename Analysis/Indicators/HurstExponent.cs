@@ -1,11 +1,14 @@
 ﻿using Microsoft.Data.Sqlite;
-using Skender.Stock.Indicators;
+using MathNet.Numerics.Statistics;
+using MathNet.Numerics.LinearRegression;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using MathNet.Numerics;
+using Skender.Stock.Indicators;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
@@ -20,68 +23,86 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             var results = new ConcurrentDictionary<DateTime, double>();
             var closePrices = candles.Select(c => (double)c.Close).ToArray();
 
-            Parallel.For(maxLag, candles.Count, i =>
-            {
-                var prices = closePrices.AsSpan().Slice(i - maxLag, maxLag);
-                double hurst = CalculateHurst(prices);
-                results[candles[i].Date] = hurst;
-            });
+            Parallel.For(maxLag, candles.Count, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+                () => new double[maxLag],
+                (i, _, buffer) =>
+                {
+                    Array.Copy(closePrices, i - maxLag, buffer, 0, maxLag);
+                    double hurst = CalculateHurst(buffer);
+                    results[candles[i].Date] = hurst;
+                    return buffer;
+                },
+                _ => { });
 
             UpdateDatabase(connection, transaction, tableName, productId, granularity, results);
         }
 
-        private static double CalculateHurst(ReadOnlySpan<double> prices)
+        private static double CalculateHurst(double[] prices)
         {
-            Span<double> rs = stackalloc double[Lags.Length];
-            Span<double> values = stackalloc double[prices.Length - Lags.Max()]; // Allocate enough space for the largest lag
-
-            for (int lagIndex = 0; lagIndex < Lags.Length; lagIndex++)
+            var logReturns = new double[prices.Length - 1];
+            for (int i = 0; i < logReturns.Length; i++)
             {
-                int lag = Lags[lagIndex];
-                int valuesLength = prices.Length - lag;
-
-                // Reuse the same span, only use the necessary portion
-                var valuesSlice = values.Slice(0, valuesLength);
-
-                for (int i = 0; i < valuesLength; i++)
-                {
-                    valuesSlice[i] = Math.Log(prices[i + lag] / prices[i]);
-                }
-
-                double mean = 0;
-                for (int i = 0; i < valuesLength; i++) mean += valuesSlice[i];
-                mean /= valuesLength;
-
-                double sumSquaredDiff = 0;
-                double min = double.MaxValue, max = double.MinValue;
-                double cumSum = 0;
-
-                for (int i = 0; i < valuesLength; i++)
-                {
-                    double adjustedValue = valuesSlice[i] - mean;
-                    sumSquaredDiff += adjustedValue * adjustedValue;
-                    cumSum += adjustedValue;
-                    if (cumSum < min) min = cumSum;
-                    if (cumSum > max) max = cumSum;
-                }
-
-                double range = max - min;
-                double stdDev = Math.Sqrt(sumSquaredDiff / valuesLength);
-                rs[lagIndex] = range / stdDev;
+                logReturns[i] = Math.Log(prices[i + 1] / prices[i]);
             }
 
-            double sumXY = 0, sumX = 0, sumY = 0, sumX2 = 0;
-            for (int i = 0; i < rs.Length; i++)
+            var rs = new double[Lags.Length];
+            Parallel.For(0, Lags.Length, i =>
             {
-                double logRs = Math.Log(rs[i]);
-                sumXY += LogLags[i] * logRs;
-                sumX += LogLags[i];
-                sumY += logRs;
-                sumX2 += LogLags[i] * LogLags[i];
+                rs[i] = CalculateRescaledRange(logReturns, Lags[i]);
+            });
+
+            var logRs = rs.Select(r => Math.Log(r)).ToArray();
+
+            // Perform linear regression
+            var p = Fit.Line(LogLags, logRs);
+
+            // The Hurst exponent is the slope of the regression line
+            return p.Item2;
+        }
+
+        private static double CalculateRescaledRange(double[] series, int lag)
+        {
+            int windowLength = series.Length - lag + 1;
+            var window = new double[windowLength];
+            double sum = 0;
+
+            // Calculate initial sum
+            for (int i = 0; i < lag; i++)
+            {
+                sum += series[i];
             }
 
-            int n = rs.Length;
-            return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+            // Calculate moving average
+            window[0] = sum / lag;
+
+            for (int i = 1; i < windowLength; i++)
+            {
+                sum = sum - series[i - 1] + series[i + lag - 1];
+                window[i] = sum / lag;
+            }
+
+            // Calculate deviations and cumulative deviations
+            double mean = 0, variance = 0;
+            double min = double.MaxValue, max = double.MinValue;
+            double cumSum = 0;
+
+            for (int i = 0; i < windowLength; i++)
+            {
+                double deviation = series[i] - window[i];
+                mean += deviation;
+                variance += deviation * deviation;
+                cumSum += deviation;
+                if (cumSum < min) min = cumSum;
+                if (cumSum > max) max = cumSum;
+            }
+
+            mean /= windowLength;
+            variance = variance / windowLength - mean * mean;
+
+            double range = max - min;
+            double stdDev = Math.Sqrt(variance);
+
+            return range / stdDev;
         }
 
         private static void UpdateDatabase(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, ConcurrentDictionary<DateTime, double> results)

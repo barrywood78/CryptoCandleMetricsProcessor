@@ -2,45 +2,61 @@
 using Skender.Stock.Indicators;
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using MathNet.Numerics.Statistics;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class VolatilityRegime
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period = 20)
         {
             var atrResults = candles.GetAtr(period).ToList();
+            var results = new List<(long DateTicks, string Regime)>();
 
             for (int i = period; i < candles.Count; i++)
             {
-                var recentATRs = atrResults.Skip(i - period).Take(period).Select(r => r.Atr ?? 0).ToList();
+                var recentATRs = atrResults.Skip(i - period).Take(period).Select(r => r.Atr ?? 0).ToArray();
+                double meanATR = recentATRs.Mean();
+                double stdDevATR = recentATRs.StandardDeviation();
 
-                double meanATR = recentATRs.Average();
-                double stdDevATR = Math.Sqrt(recentATRs.Select(x => Math.Pow(x - meanATR, 2)).Sum() / period);
+                string regime = DetermineRegime(atrResults[i].Atr ?? 0, meanATR, stdDevATR);
+                results.Add((candles[i].Date.Ticks, regime));
+            }
 
-                string regime;
-                if ((atrResults[i].Atr ?? 0) > meanATR + stdDevATR) regime = "High";
-                else if ((atrResults[i].Atr ?? 0) < meanATR - stdDevATR) regime = "Low";
-                else regime = "Medium";
+            UpdateVolatilityRegimes(connection, transaction, tableName, productId, granularity, results);
+        }
 
+        private static string DetermineRegime(double atr, double meanATR, double stdDevATR)
+        {
+            if (atr > meanATR + stdDevATR) return "High";
+            if (atr < meanATR - stdDevATR) return "Low";
+            return "Medium";
+        }
 
-                string updateQuery = $@"
+        private static void UpdateVolatilityRegimes(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<(long DateTicks, string Regime)> results)
+        {
+            string updateQuery = $@"
                 UPDATE {tableName}
                 SET VolatilityRegime = @VolatilityRegime
                 WHERE ProductId = @ProductId
                   AND Granularity = @Granularity
-                  AND StartDate = @StartDate";
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
 
-                using (var command = new SqliteCommand(updateQuery, connection, transaction))
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@VolatilityRegime", SqliteType.Text);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in results.Chunk(BatchSize))
+            {
+                foreach (var (dateTicks, regime) in batch)
                 {
-                    command.Parameters.AddWithValue("@VolatilityRegime", regime);
-                    command.Parameters.AddWithValue("@ProductId", productId);
-                    command.Parameters.AddWithValue("@Granularity", granularity);
-                    command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                    command.Parameters["@VolatilityRegime"].Value = regime;
+                    command.Parameters["@StartDate"].Value = dateTicks;
                     command.ExecuteNonQuery();
                 }
             }

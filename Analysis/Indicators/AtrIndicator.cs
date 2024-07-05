@@ -1,12 +1,15 @@
 ﻿using Skender.Stock.Indicators;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class AtrIndicator
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         /// <summary>
         /// Calculates the Average True Range (ATR) indicator and updates the database.
         /// </summary>
@@ -20,31 +23,31 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
         {
             // Calculate ATR results using the Skender.Stock.Indicators library
-            var atrResults = candles.GetAtr(period).ToList();
+            var atrResults = candles.GetAtr(period)
+                                    .Where(r => r.Atr.HasValue)
+                                    .Select(r => new { r.Date, Atr = r.Atr.Value })
+                                    .ToList();
 
-            // Iterate through each ATR result and update the database
-            for (int i = 0; i < atrResults.Count; i++)
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET ATR = @ATR
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@ATR", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in atrResults.Chunk(BatchSize))
             {
-                if (atrResults[i].Atr != null) // Only update if ATR value is not null
+                foreach (var result in batch)
                 {
-                    string updateQuery = $@"
-                        UPDATE {tableName}
-                        SET ATR = @ATR
-                        WHERE ProductId = @ProductId
-                          AND Granularity = @Granularity
-                          AND StartDate = @StartDate";
-
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        // Add parameters to the update command
-                        command.Parameters.AddWithValue("@ATR", atrResults[i].Atr);
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", atrResults[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                        // Execute the update command
-                        command.ExecuteNonQuery();
-                    }
+                    command.Parameters["@ATR"].Value = result.Atr;
+                    command.Parameters["@StartDate"].Value = result.Date.Ticks;
+                    command.ExecuteNonQuery();
                 }
             }
         }

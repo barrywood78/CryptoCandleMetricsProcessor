@@ -1,12 +1,15 @@
 ﻿using Skender.Stock.Indicators;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class AdxIndicator
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         /// <summary>
         /// Calculates the Average Directional Index (ADX) indicator and updates the database.
         /// </summary>
@@ -20,31 +23,31 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles, int period)
         {
             // Calculate ADX results using the Skender.Stock.Indicators library
-            var adxResults = candles.GetAdx(period).ToList();
+            var adxResults = candles.GetAdx(period)
+                                    .Where(r => r.Adx.HasValue)
+                                    .Select(r => new { r.Date, Value = r.Adx.Value })
+                                    .ToList();
 
-            // Iterate through each ADX result and update the database
-            for (int i = 0; i < adxResults.Count; i++)
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET ADX = @ADX
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@ADX", SqliteType.Real);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in adxResults.Chunk(BatchSize))
             {
-                if (adxResults[i].Adx != null) // Only update if ADX value is not null
+                foreach (var result in batch)
                 {
-                    string updateQuery = $@"
-                        UPDATE {tableName}
-                        SET ADX = @ADX
-                        WHERE ProductId = @ProductId
-                          AND Granularity = @Granularity
-                          AND StartDate = @StartDate";
-
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        // Add parameters to the update command
-                        command.Parameters.AddWithValue("@ADX", adxResults[i].Adx);
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", adxResults[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                        // Execute the update command
-                        command.ExecuteNonQuery();
-                    }
+                    command.Parameters["@ADX"].Value = result.Value;
+                    command.Parameters["@StartDate"].Value = result.Date.Ticks;
+                    command.ExecuteNonQuery();
                 }
             }
         }

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using Skender.Stock.Indicators;
 
@@ -8,106 +8,118 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class CompositeMarketSentimentIndicator
     {
+        private const int BatchSize = 50000; // Optimal batch size for local SQLite operations
+
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles)
         {
-            var rsiResults = GetIndicatorValues(connection, transaction, tableName, productId, granularity, "RSI");
-            var macdHistogram = GetIndicatorValues(connection, transaction, tableName, productId, granularity, "MACD_Histogram");
-            var bollingerPercentB = GetIndicatorValues(connection, transaction, tableName, productId, granularity, "BB_PercentB");
-            var adx = GetIndicatorValues(connection, transaction, tableName, productId, granularity, "ADX");
-            var relativeVolume = GetIndicatorValues(connection, transaction, tableName, productId, granularity, "RelativeVolume");
+            var indicators = new[] { "RSI", "MACD_Histogram", "BB_PercentB", "ADX", "RelativeVolume" };
+            var indicatorValues = GetIndicatorValues(connection, transaction, tableName, productId, granularity, indicators);
+
+            var sentiments = new List<(long DateTicks, decimal Sentiment, string Category)>();
 
             for (int i = 0; i < candles.Count; i++)
             {
                 decimal sentiment = 0;
                 int componentsCount = 0;
 
-                decimal? rsiValue = rsiResults[i];
-                if (rsiValue.HasValue)
+                if (indicatorValues["RSI"][i].HasValue)
                 {
-                    sentiment += ((rsiValue ?? 0) - 50) / 50;
+                    sentiment += ((indicatorValues["RSI"][i] ?? 0) - 50) / 50;
                     componentsCount++;
                 }
 
-                decimal? macdValue = macdHistogram[i];
-                if (macdValue.HasValue)
+                if (indicatorValues["MACD_Histogram"][i].HasValue)
                 {
-                    sentiment += (macdValue ?? 0) / candles[i].Close;
+                    sentiment += (indicatorValues["MACD_Histogram"][i] ?? 0) / candles[i].Close;
                     componentsCount++;
                 }
 
-                decimal? bbValue = bollingerPercentB[i];
-                if (bbValue.HasValue)
+                if (indicatorValues["BB_PercentB"][i].HasValue)
                 {
-                    sentiment += (bbValue ?? 0) - 0.5m;
+                    sentiment += (indicatorValues["BB_PercentB"][i] ?? 0) - 0.5m;
                     componentsCount++;
                 }
 
-                decimal? adxValue = adx[i];
-                if (adxValue.HasValue)
+                if (indicatorValues["ADX"][i].HasValue)
                 {
-                    sentiment += ((adxValue ?? 0) / 100) - 0.5m;
+                    sentiment += ((indicatorValues["ADX"][i] ?? 0) / 100) - 0.5m;
                     componentsCount++;
                 }
 
-                decimal? rvValue = relativeVolume[i];
-                if (rvValue.HasValue)
+                if (indicatorValues["RelativeVolume"][i].HasValue)
                 {
-                    sentiment += (rvValue ?? 0) / 10;
+                    sentiment += (indicatorValues["RelativeVolume"][i] ?? 0) / 10;
                     componentsCount++;
                 }
 
                 if (componentsCount > 0)
                 {
                     sentiment /= componentsCount;
-
-                    string sentimentCategory;
-                    if (sentiment > 0.6m) sentimentCategory = "Very Bullish";
-                    else if (sentiment > 0.2m) sentimentCategory = "Bullish";
-                    else if (sentiment < -0.6m) sentimentCategory = "Very Bearish";
-                    else if (sentiment < -0.2m) sentimentCategory = "Bearish";
-                    else sentimentCategory = "Neutral";
-
-                    string updateQuery = $@"
-                    UPDATE {tableName}
-                    SET CompositeSentiment = @CompositeSentiment,
-                        SentimentCategory = @SentimentCategory
-                    WHERE ProductId = @ProductId
-                      AND Granularity = @Granularity
-                      AND StartDate = @StartDate";
-
-                    using (var command = new SqliteCommand(updateQuery, connection, transaction))
-                    {
-                        command.Parameters.AddWithValue("@CompositeSentiment", sentiment);
-                        command.Parameters.AddWithValue("@SentimentCategory", sentimentCategory);
-                        command.Parameters.AddWithValue("@ProductId", productId);
-                        command.Parameters.AddWithValue("@Granularity", granularity);
-                        command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-                        command.ExecuteNonQuery();
-                    }
+                    string sentimentCategory = CategorizeSentiment(sentiment);
+                    sentiments.Add((candles[i].Date.Ticks, sentiment, sentimentCategory));
                 }
             }
+
+            UpdateSentiments(connection, transaction, tableName, productId, granularity, sentiments);
         }
 
-        private static List<decimal?> GetIndicatorValues(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, string indicatorName)
+        private static Dictionary<string, List<decimal?>> GetIndicatorValues(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, string[] indicators)
         {
-            var values = new List<decimal?>();
-            string query = $"SELECT {indicatorName} FROM {tableName} WHERE ProductId = @ProductId AND Granularity = @Granularity ORDER BY StartDate";
+            var result = indicators.ToDictionary(i => i, _ => new List<decimal?>());
+            string query = $"SELECT StartDate, {string.Join(", ", indicators)} FROM {tableName} WHERE ProductId = @ProductId AND Granularity = @Granularity ORDER BY StartDate";
 
-            using (var command = new SqliteCommand(query, connection, transaction))
+            using var command = new SqliteCommand(query, connection, transaction);
+            command.Parameters.AddWithValue("@ProductId", productId);
+            command.Parameters.AddWithValue("@Granularity", granularity);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
             {
-                command.Parameters.AddWithValue("@ProductId", productId);
-                command.Parameters.AddWithValue("@Granularity", granularity);
-
-                using (var reader = command.ExecuteReader())
+                for (int i = 0; i < indicators.Length; i++)
                 {
-                    while (reader.Read())
-                    {
-                        values.Add(reader.IsDBNull(0) ? (decimal?)null : reader.GetDecimal(0));
-                    }
+                    result[indicators[i]].Add(reader.IsDBNull(i + 1) ? (decimal?)null : reader.GetDecimal(i + 1));
                 }
             }
 
-            return values;
+            return result;
+        }
+
+        private static string CategorizeSentiment(decimal sentiment)
+        {
+            if (sentiment > 0.6m) return "Very Bullish";
+            if (sentiment > 0.2m) return "Bullish";
+            if (sentiment < -0.6m) return "Very Bearish";
+            if (sentiment < -0.2m) return "Bearish";
+            return "Neutral";
+        }
+
+        private static void UpdateSentiments(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<(long DateTicks, decimal Sentiment, string Category)> sentiments)
+        {
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET CompositeSentiment = @CompositeSentiment,
+                    SentimentCategory = @SentimentCategory
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@CompositeSentiment", SqliteType.Real);
+            command.Parameters.Add("@SentimentCategory", SqliteType.Text);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in sentiments.Chunk(BatchSize))
+            {
+                foreach (var (dateTicks, sentiment, category) in batch)
+                {
+                    command.Parameters["@CompositeSentiment"].Value = (double)sentiment;
+                    command.Parameters["@SentimentCategory"].Value = category;
+                    command.Parameters["@StartDate"].Value = dateTicks;
+                    command.ExecuteNonQuery();
+                }
+            }
         }
     }
 }

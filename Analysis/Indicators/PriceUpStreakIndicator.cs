@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using Skender.Stock.Indicators;
 
@@ -7,6 +8,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
     public static class PriceUpStreakIndicator
     {
+        private const int BatchSize = 50000;
+
         /// <summary>
         /// Calculates the price up streak (consecutive periods where the closing price is higher than the previous period)
         /// and updates the database.
@@ -20,6 +23,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles)
         {
             int priceUpStreak = 0; // Initialize the price up streak counter
+            var priceUpStreakResults = new List<(long DateTicks, int PriceUpStreak)>();
 
             // Iterate through each candle starting from the second one
             for (int i = 1; i < candles.Count; i++)
@@ -37,22 +41,31 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     priceUpStreak = 0;
                 }
 
-                string updateQuery = $@"
-                    UPDATE {tableName}
-                    SET PriceUpStreak = @PriceUpStreak
-                    WHERE ProductId = @ProductId
-                      AND Granularity = @Granularity
-                      AND StartDate = @StartDate";
+                priceUpStreakResults.Add((candles[i].Date.Ticks, priceUpStreak));
+            }
 
-                using (var command = new SqliteCommand(updateQuery, connection, transaction))
+            string updateQuery = $@"
+                UPDATE {tableName}
+                SET PriceUpStreak = @PriceUpStreak
+                WHERE ProductId = @ProductId
+                  AND Granularity = @Granularity
+                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+
+            using var command = new SqliteCommand(updateQuery, connection, transaction);
+            command.Parameters.Add("@PriceUpStreak", SqliteType.Integer);
+            command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
+            command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
+            command.Parameters.Add("@StartDate", SqliteType.Integer);
+
+            foreach (var batch in priceUpStreakResults
+                .Select((value, index) => new { value, index })
+                .GroupBy(x => x.index / BatchSize)
+                .Select(group => group.Select(x => x.value).ToList()))
+            {
+                foreach (var result in batch)
                 {
-                    // Add parameters to the update command
-                    command.Parameters.AddWithValue("@PriceUpStreak", priceUpStreak);
-                    command.Parameters.AddWithValue("@ProductId", productId);
-                    command.Parameters.AddWithValue("@Granularity", granularity);
-                    command.Parameters.AddWithValue("@StartDate", candles[i].Date.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-
-                    // Execute the update command
+                    command.Parameters["@PriceUpStreak"].Value = result.PriceUpStreak;
+                    command.Parameters["@StartDate"].Value = result.DateTicks;
                     command.ExecuteNonQuery();
                 }
             }
