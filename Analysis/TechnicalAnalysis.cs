@@ -98,8 +98,8 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 await ProcessCandlePatternsAsync(connection, tableName, groupedCandles, logger);
 
                 // Create indexes and run ANALYZE
-                await CreateIndexesAndAnalyzeAsync(dbFilePath, tableName);
-                await logger.Log(LogLevel.Information, "Indexes created and ANALYZE run successfully.");
+                //await CreateIndexesAndAnalyzeAsync(dbFilePath, tableName);
+                //await logger.Log(LogLevel.Information, "Indexes created and ANALYZE run successfully.");
 
                 // Calculate BuySignals
                 await CalculateBuySignalsAsync(connection, tableName, groupedCandles, logger);
@@ -158,51 +158,51 @@ namespace CryptoCandleMetricsProcessor.Analysis
             }
         }
 
-        private static async Task CreateIndexesAndAnalyzeAsync(string dbFilePath, string tableName)
-        {
-            using (var connection = new SqliteConnection($"Data Source={dbFilePath}"))
-            {
-                await connection.OpenAsync();
-                using (var command = connection.CreateCommand())
-                {
-                    command.CommandText = $@"
-                        -- Index on ProductId and Granularity (composite index)
-                        CREATE INDEX IF NOT EXISTS idx_product_granularity ON {tableName}(ProductId, Granularity);
+        //private static async Task CreateIndexesAndAnalyzeAsync(string dbFilePath, string tableName)
+        //{
+        //    using (var connection = new SqliteConnection($"Data Source={dbFilePath}"))
+        //    {
+        //        await connection.OpenAsync();
+        //        using (var command = connection.CreateCommand())
+        //        {
+        //            command.CommandText = $@"
+        //                -- Index on ProductId and Granularity (composite index)
+        //                CREATE INDEX IF NOT EXISTS idx_product_granularity ON {tableName}(ProductId, Granularity);
 
-                        -- Index on StartDate
-                        CREATE INDEX IF NOT EXISTS idx_start_date ON {tableName}(StartDate);
+        //                -- Index on StartDate
+        //                CREATE INDEX IF NOT EXISTS idx_start_date ON {tableName}(StartDate);
 
-                        -- Index on BuyScore (for percentile calculations)
-                        CREATE INDEX IF NOT EXISTS idx_buy_score ON {tableName}(BuyScore);
+        //                -- Index on BuyScore (for percentile calculations)
+        //                CREATE INDEX IF NOT EXISTS idx_buy_score ON {tableName}(BuyScore);
 
-                        -- Indexes on individual columns used in the BuyScore calculation
-                        CREATE INDEX IF NOT EXISTS idx_rsi ON {tableName}(RSI);
-                        CREATE INDEX IF NOT EXISTS idx_stoch_k ON {tableName}(Stoch_K);
-                        CREATE INDEX IF NOT EXISTS idx_stoch_d ON {tableName}(Stoch_D);
-                        CREATE INDEX IF NOT EXISTS idx_adx ON {tableName}(ADX);
-                        CREATE INDEX IF NOT EXISTS idx_bb_percentb ON {tableName}(BB_PercentB);
-                        CREATE INDEX IF NOT EXISTS idx_cmf ON {tableName}(CMF);
-                        CREATE INDEX IF NOT EXISTS idx_macd_histogram ON {tableName}(MACD_Histogram);
-                        CREATE INDEX IF NOT EXISTS idx_adl ON {tableName}(ADL);
-                        CREATE INDEX IF NOT EXISTS idx_ema ON {tableName}(EMA);
-                        CREATE INDEX IF NOT EXISTS idx_sma ON {tableName}(SMA);
-                        CREATE INDEX IF NOT EXISTS idx_macd ON {tableName}(MACD);
-                        CREATE INDEX IF NOT EXISTS idx_macd_signal ON {tableName}(MACD_Signal);
+        //                -- Indexes on individual columns used in the BuyScore calculation
+        //                CREATE INDEX IF NOT EXISTS idx_rsi ON {tableName}(RSI);
+        //                CREATE INDEX IF NOT EXISTS idx_stoch_k ON {tableName}(Stoch_K);
+        //                CREATE INDEX IF NOT EXISTS idx_stoch_d ON {tableName}(Stoch_D);
+        //                CREATE INDEX IF NOT EXISTS idx_adx ON {tableName}(ADX);
+        //                CREATE INDEX IF NOT EXISTS idx_bb_percentb ON {tableName}(BB_PercentB);
+        //                CREATE INDEX IF NOT EXISTS idx_cmf ON {tableName}(CMF);
+        //                CREATE INDEX IF NOT EXISTS idx_macd_histogram ON {tableName}(MACD_Histogram);
+        //                CREATE INDEX IF NOT EXISTS idx_adl ON {tableName}(ADL);
+        //                CREATE INDEX IF NOT EXISTS idx_ema ON {tableName}(EMA);
+        //                CREATE INDEX IF NOT EXISTS idx_sma ON {tableName}(SMA);
+        //                CREATE INDEX IF NOT EXISTS idx_macd ON {tableName}(MACD);
+        //                CREATE INDEX IF NOT EXISTS idx_macd_signal ON {tableName}(MACD_Signal);
 
-                        -- Indexes on lagged columns
-                        CREATE INDEX IF NOT EXISTS idx_lagged_macd_1 ON {tableName}(Lagged_MACD_1);
-                        CREATE INDEX IF NOT EXISTS idx_lagged_close_1 ON {tableName}(Lagged_Close_1);
+        //                -- Indexes on lagged columns
+        //                CREATE INDEX IF NOT EXISTS idx_lagged_macd_1 ON {tableName}(Lagged_MACD_1);
+        //                CREATE INDEX IF NOT EXISTS idx_lagged_close_1 ON {tableName}(Lagged_Close_1);
 
-                        -- Composite index for the main query in CalculateBuyScoresInDatabase
-                        CREATE INDEX IF NOT EXISTS idx_main_query ON {tableName}(ProductId, Granularity, RSI, Stoch_K, Stoch_D, ADX, BB_PercentB, CMF, MACD_Histogram, ADL, EMA, SMA, MACD, MACD_Signal);
+        //                -- Composite index for the main query in CalculateBuyScoresInDatabase
+        //                CREATE INDEX IF NOT EXISTS idx_main_query ON {tableName}(ProductId, Granularity, RSI, Stoch_K, Stoch_D, ADX, BB_PercentB, CMF, MACD_Histogram, ADL, EMA, SMA, MACD, MACD_Signal);
 
-                        -- Run ANALYZE
-                        ANALYZE;
-                    ";
-                    await command.ExecuteNonQueryAsync();
-                }
-            }
-        }
+        //                -- Run ANALYZE
+        //                ANALYZE;
+        //            ";
+        //            await command.ExecuteNonQueryAsync();
+        //        }
+        //    }
+        //}
 
         private static async Task CalculateBuySignalsAsync(SqliteConnection connection, string tableName, Dictionary<(string ProductId, string Granularity), List<Quote>> groupedCandles, SwiftLogger.SwiftLogger logger)
         {
