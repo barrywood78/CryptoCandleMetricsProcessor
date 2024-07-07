@@ -318,8 +318,9 @@ namespace CryptoCandleMetricsProcessor.Analysis
         {
             return new Dictionary<string, Action<SqliteConnection, SqliteTransaction, string, string, string, List<Quote>, Dictionary<string, int>>>
             {
-                {"PriceUp", (conn, trans, table, prod, gran, c, p) => PriceUpIndicator.Calculate(conn, trans, table, prod, gran, c)},
-                {"PriceUpStreak", (conn, trans, table, prod, gran, c, p) => PriceUpStreakIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                {"ClosePriceIncrease", (conn, trans, table, prod, gran, c, p) => ClosePriceIncreaseIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                {"ClosePriceIncreaseStreak", (conn, trans, table, prod, gran, c, p) => ClosePriceIncreaseStreakIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                {"ClosedHigherThanOpen", (conn, trans, table, prod, gran, c, p) => ClosedHigherThanOpenIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"SMA", (conn, trans, table, prod, gran, c, p) => SmaIndicator.Calculate(conn, trans, table, prod, gran, c, p["SMA"])},
                 {"EMA", (conn, trans, table, prod, gran, c, p) => EmaIndicator.Calculate(conn, trans, table, prod, gran, c, p["EMA"])},
                 {"ATR", (conn, trans, table, prod, gran, c, p) => AtrIndicator.Calculate(conn, trans, table, prod, gran, c, p["ATR"])},

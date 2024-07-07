@@ -18,8 +18,9 @@ namespace CryptoCandleMetricsProcessor.Database
                 new FieldDefinition { Name = "Open", DataType = "REAL" },
                 new FieldDefinition { Name = "Close", DataType = "REAL" },
                 new FieldDefinition { Name = "Volume", DataType = "REAL" },
-                new FieldDefinition { Name = "PriceUp", DataType = "INTEGER" }, // PriceUp (0 or 1)
-                new FieldDefinition { Name = "PriceUpStreak", DataType = "INTEGER" },
+                new FieldDefinition { Name = "ClosePriceIncrease", DataType = "INTEGER" }, 
+                new FieldDefinition { Name = "ClosePriceIncreaseStreak", DataType = "INTEGER" },
+                new FieldDefinition { Name = "ClosedHigherThanOpen", DataType = "INTEGER" },
                 new FieldDefinition { Name = "BuyScore", DataType = "INTEGER" },
                 new FieldDefinition { Name = "SMA", DataType = "REAL" },  // Simple Moving Average
                 new FieldDefinition { Name = "EMA", DataType = "REAL" },  // Exponential Moving Average

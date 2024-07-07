@@ -27,6 +27,7 @@ namespace CryptoCandleMetricsProcessor
             string importFolderPath = config["ImportFolderPath"] ?? throw new InvalidOperationException("ImportFolderPath is not set in the configuration.");
             string exportFolderPath = config["ExportFolderPath"] ?? throw new InvalidOperationException("ExportFolderPath is not set in the configuration.");
             string dbFilePath = config["DatabaseFilePath"] ?? throw new InvalidOperationException("DatabaseFilePath is not set in the configuration.");
+            string logFilePath = config["LogFilePath"] ?? throw new InvalidOperationException("LogFilePath is not set in the configuration.");
 
             DateTime startTime = DateTime.Now;
             string timestamp = startTime.ToString("yyyyMMdd_HHmmss");
@@ -37,7 +38,7 @@ namespace CryptoCandleMetricsProcessor
                 .SetMinimumLogLevel(LogLevel.Information);
 
             var fileConfig = new FileLoggerConfig()
-                .SetFilePath($"CryptoCandleMetricsProcessor-{timestamp}.txt")
+                .SetFilePath(Path.Combine(logFilePath, $"CryptoCandleMetricsProcessor-{timestamp}.log"))
                 .EnableSeparationByDate();
 
             var logger = new LoggerConfigBuilder()

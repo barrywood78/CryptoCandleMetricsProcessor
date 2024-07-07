@@ -1,17 +1,16 @@
 ﻿using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Microsoft.Data.Sqlite;
 using Skender.Stock.Indicators;
 
 namespace CryptoCandleMetricsProcessor.Analysis.Indicators
 {
-    public static class PriceUpStreakIndicator
+    public static class ClosePriceIncreaseStreakIndicator
     {
         private const int BatchSize = 50000;
 
         /// <summary>
-        /// Calculates the price up streak (consecutive periods where the closing price is higher than the previous period)
+        /// Calculates the close price increase streak (consecutive periods where the closing price is higher than the previous period)
         /// and updates the database.
         /// </summary>
         /// <param name="connection">The SQLite database connection.</param>
@@ -22,49 +21,43 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         /// <param name="candles">The list of candle data to process.</param>
         public static void Calculate(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<Quote> candles)
         {
-            int priceUpStreak = 0; // Initialize the price up streak counter
-            var priceUpStreakResults = new List<(long DateTicks, int PriceUpStreak)>();
+            int closePriceIncreaseStreak = 0;
+            var closePriceIncreaseStreakResults = new List<(long DateTicks, int ClosePriceIncreaseStreak)>();
 
-            // Iterate through each candle starting from the second one
             for (int i = 1; i < candles.Count; i++)
             {
-                // Determine if the price is up compared to the previous candle
-                int priceUp = candles[i].Close > candles[i - 1].Close ? 1 : 0;
+                int closePriceIncrease = candles[i].Close > candles[i - 1].Close ? 1 : 0;
 
-                // Update the streak counter
-                if (priceUp == 1)
+                if (closePriceIncrease == 1)
                 {
-                    priceUpStreak++;
+                    closePriceIncreaseStreak++;
                 }
                 else
                 {
-                    priceUpStreak = 0;
+                    closePriceIncreaseStreak = 0;
                 }
 
-                priceUpStreakResults.Add((candles[i].Date.Ticks, priceUpStreak));
+                closePriceIncreaseStreakResults.Add((candles[i].Date.Ticks, closePriceIncreaseStreak));
             }
 
             string updateQuery = $@"
                 UPDATE {tableName}
-                SET PriceUpStreak = @PriceUpStreak
+                SET ClosePriceIncreaseStreak = @ClosePriceIncreaseStreak
                 WHERE ProductId = @ProductId
                   AND Granularity = @Granularity
                   AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
 
             using var command = new SqliteCommand(updateQuery, connection, transaction);
-            command.Parameters.Add("@PriceUpStreak", SqliteType.Integer);
+            command.Parameters.Add("@ClosePriceIncreaseStreak", SqliteType.Integer);
             command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
             command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
             command.Parameters.Add("@StartDate", SqliteType.Integer);
 
-            foreach (var batch in priceUpStreakResults
-                .Select((value, index) => new { value, index })
-                .GroupBy(x => x.index / BatchSize)
-                .Select(group => group.Select(x => x.value).ToList()))
+            foreach (var batch in closePriceIncreaseStreakResults.Chunk(BatchSize))
             {
                 foreach (var result in batch)
                 {
-                    command.Parameters["@PriceUpStreak"].Value = result.PriceUpStreak;
+                    command.Parameters["@ClosePriceIncreaseStreak"].Value = result.ClosePriceIncreaseStreak;
                     command.Parameters["@StartDate"].Value = result.DateTicks;
                     command.ExecuteNonQuery();
                 }

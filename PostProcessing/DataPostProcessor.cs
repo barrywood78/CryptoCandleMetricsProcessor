@@ -339,7 +339,7 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             var defaultOneFields = new[] { "RelativeVolume" };
             await FillWithValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, defaultOneFields, 1);
 
-            var defaultZeroFields = new[] { "PriceUp", "PriceUpStreak", "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum",
+            var defaultZeroFields = new[] { "ClosePriceIncrease", "ClosePriceIncreaseStreak", "ClosedHigherThanOpen", "TrendStrength", "TrendDuration", "CompositeSentiment", "CompositeMomentum",
                                             "MACDCrossover", "EMACrossover", "CycleDominantPeriod", "CyclePhase",
                                             "MarketVolatility", "OrderFlowImbalance", "RSIDivergence", "MACDDivergence",
                                             "RSIDivergenceStrength", "HistoricalVolatility", "ROC_5", "ROC_10" };
