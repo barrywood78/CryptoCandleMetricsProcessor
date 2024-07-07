@@ -30,7 +30,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in rsiResults)
             {
-                rsiData.Add((result.Date.Ticks, (decimal)result.Rsi));
+                rsiData.Add((result.Date.Ticks, (decimal)result.Rsi!));
             }
 
             string updateQuery = $@"

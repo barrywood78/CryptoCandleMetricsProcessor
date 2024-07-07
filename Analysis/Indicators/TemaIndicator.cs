@@ -30,7 +30,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in temaResults)
             {
-                temaData.Add((result.Date.Ticks, (decimal)result.Tema));
+                temaData.Add((result.Date.Ticks, (decimal)result.Tema!));
             }
 
             string updateQuery = $@"

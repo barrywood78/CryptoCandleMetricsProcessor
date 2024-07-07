@@ -24,7 +24,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Calculate EMA results using the Skender.Stock.Indicators library
             var emaResults = candles.GetEma(period)
                                     .Where(r => r.Ema.HasValue)
-                                    .Select(r => new { r.Date, Value = r.Ema.Value })
+                                    .Select(r => new { r.Date, Value = r.Ema!.Value })
                                     .ToList();
 
             string updateQuery = $@"

@@ -24,7 +24,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         {
             var cmfResults = candles.GetCmf(period)
                                     .Where(r => r.Cmf.HasValue)
-                                    .Select(r => (DateTicks: r.Date.Ticks, Cmf: r.Cmf.Value))
+                                    .Select(r => (DateTicks: r.Date.Ticks, Cmf: r.Cmf!.Value))
                                     .ToList();
 
             UpdateCmfValues(connection, transaction, tableName, productId, granularity, cmfResults);

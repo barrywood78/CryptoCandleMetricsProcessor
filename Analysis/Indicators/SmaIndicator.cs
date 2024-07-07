@@ -30,7 +30,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in smaResults)
             {
-                smaData.Add((result.Date.Ticks, (decimal)result.Sma));
+                smaData.Add((result.Date.Ticks, (decimal)result.Sma!));
             }
 
             string updateQuery = $@"

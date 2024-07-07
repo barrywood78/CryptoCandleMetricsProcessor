@@ -14,20 +14,24 @@ namespace CryptoCandleMetricsProcessor.Exporters
         /// Exports data from the specified SQLite database to CSV files.
         /// </summary>
         /// <param name="dbFilePath">The path to the SQLite database file.</param>
-        /// <param name="outputDirectory">The directory where the CSV files will be saved. If not specified, the executing assembly's location will be used.</param>
+        /// <param name="logger">The logger instance for logging messages.</param>
+        /// <param name="outputDirectory">The directory where the CSV files will be saved.</param>
         /// <exception cref="ArgumentNullException">Thrown when the dbFilePath is null or empty.</exception>
         /// <exception cref="InvalidOperationException">Thrown when the output directory cannot be determined.</exception>
-        public static async Task ExportDatabaseToCsvAsync(string dbFilePath, SwiftLogger.SwiftLogger logger,  string outputDirectory = "")
+        public static async Task ExportDatabaseToCsvAsync(string dbFilePath, SwiftLogger.SwiftLogger logger, string outputDirectory)
         {
             // Check if the database file path is provided
             if (string.IsNullOrEmpty(dbFilePath)) throw new ArgumentNullException(nameof(dbFilePath));
 
-            // Determine the output directory if not provided
+            // Check if the output directory is provided
             if (string.IsNullOrEmpty(outputDirectory))
             {
                 outputDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)
                                   ?? throw new InvalidOperationException("Could not determine the output directory.");
             }
+
+            // Ensure the output directory exists
+            Directory.CreateDirectory(outputDirectory);
 
             // Create the connection string for the SQLite database
             string connectionString = $"Data Source={Path.GetFullPath(dbFilePath)}";
@@ -113,8 +117,6 @@ namespace CryptoCandleMetricsProcessor.Exporters
                 await logger.Log(LogLevel.Error, $"Export_{productId}_{granularity}.csv did not export successfully: {ex.Message}");
                 throw;
             }
-            
-            
         }
     }
 }

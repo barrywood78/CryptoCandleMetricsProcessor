@@ -20,7 +20,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in vwapResults)
             {
-                vwapData.Add((result.Date.Ticks, (decimal)result.Vwap));
+                vwapData.Add((result.Date.Ticks, (decimal)result.Vwap!));
             }
 
             string updateQuery = $@"

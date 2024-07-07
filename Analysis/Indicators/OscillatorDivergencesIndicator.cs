@@ -29,8 +29,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     rsiDivergence = IsOscillatorDivergence(
                         candles[i].Close,
                         candles[i - 1].Close,
-                        rsiResults[i].Rsi.Value,
-                        rsiResults[i - 1].Rsi.Value);
+                        rsiResults[i].Rsi!.Value,
+                        rsiResults[i - 1].Rsi!.Value);
                 }
 
                 if (macdResults[i].Macd.HasValue && macdResults[i - 1].Macd.HasValue)
@@ -38,8 +38,8 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     macdDivergence = IsOscillatorDivergence(
                         candles[i].Close,
                         candles[i - 1].Close,
-                        macdResults[i].Macd.Value,
-                        macdResults[i - 1].Macd.Value);
+                        macdResults[i].Macd!.Value,
+                        macdResults[i - 1].Macd!.Value);
                 }
 
                 results.Add((candles[i].Date.Ticks, rsiDivergence, macdDivergence));

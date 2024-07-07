@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using CryptoCandleMetricsProcessor.Models;
 
@@ -7,23 +9,14 @@ namespace CryptoCandleMetricsProcessor.Database
 {
     public static class DatabaseCreator
     {
-        /// <summary>
-        /// Creates a SQLite database with the specified table and fields if it does not already exist.
-        /// </summary>
-        /// <param name="dbFilePath">The path to the SQLite database file.</param>
-        /// <param name="tableName">The name of the table to create in the database.</param>
-        /// <param name="fields">A list of field definitions for the table.</param>
-        public static void CreateDatabaseWithTable(string dbFilePath, string tableName, List<FieldDefinition> fields)
+        public static async Task CreateDatabaseWithTableAsync(string dbFilePath, string tableName, List<FieldDefinition> fields)
         {
-            // Create the connection string for the SQLite database
             string connectionString = $"Data Source={Path.GetFullPath(dbFilePath)}";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
 
-            // Open a connection to the SQLite database
-            using (var connection = new SqliteConnection(connectionString))
+            try
             {
-                connection.Open();
-
-                // Generate the SQL for creating the table with the specified fields
                 var fieldDefinitions = string.Join(", ", fields.ConvertAll(f => $"[{f.Name}] {f.DataType}"));
                 string createTableQuery = $@"
                     CREATE TABLE IF NOT EXISTS [{tableName}] (
@@ -31,13 +24,11 @@ namespace CryptoCandleMetricsProcessor.Database
                         {fieldDefinitions}
                     )";
 
-                // Execute the create table query
-                using (var command = new SqliteCommand(createTableQuery, connection))
+                await using (var command = new SqliteCommand(createTableQuery, connection))
                 {
-                    command.ExecuteNonQuery();
+                    await command.ExecuteNonQueryAsync();
                 }
 
-                // Generate the SQL for creating indexes on the table
                 string createIndexQuery = $@"
                     CREATE INDEX IF NOT EXISTS idx_{tableName}_ProductId ON [{tableName}] (ProductId);
                     CREATE INDEX IF NOT EXISTS idx_{tableName}_Granularity ON [{tableName}] (Granularity);
@@ -46,11 +37,16 @@ namespace CryptoCandleMetricsProcessor.Database
                     ANALYZE;
                 ";
 
-                // Execute the create indexes query
-                using (var command = new SqliteCommand(createIndexQuery, connection))
+                await using (var command = new SqliteCommand(createIndexQuery, connection))
                 {
-                    command.ExecuteNonQuery();
+                    await command.ExecuteNonQueryAsync();
                 }
+            }
+            catch (Exception ex)
+            {
+                // Log the exception or handle it as needed
+                Console.WriteLine($"Error creating database: {ex.Message}");
+                throw;
             }
         }
     }

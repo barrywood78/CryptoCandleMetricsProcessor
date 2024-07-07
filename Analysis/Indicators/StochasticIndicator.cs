@@ -30,7 +30,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in stochasticResults)
             {
-                stochData.Add((result.Date.Ticks, (decimal)result.K, (decimal)result.D));
+                stochData.Add((result.Date.Ticks, (decimal)result.K!, (decimal)result.D!));
             }
 
             string updateQuery = $@"

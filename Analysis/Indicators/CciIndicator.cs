@@ -19,7 +19,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 if (cciResults[i].Cci.HasValue)
                 {
-                    validCciResults.Add((cciResults[i].Date.Ticks, cciResults[i].Cci.Value));
+                    validCciResults.Add((cciResults[i].Date.Ticks, cciResults[i].Cci!.Value));
                 }
             }
 

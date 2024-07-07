@@ -28,7 +28,6 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         {
             decimal buyingPressure = 0;
             decimal sellingPressure = 0;
-
             foreach (var candle in periodCandles)
             {
                 if (candle.Close > candle.Open)
@@ -41,7 +40,15 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                 }
             }
 
-            return (buyingPressure - sellingPressure) / (buyingPressure + sellingPressure);
+            decimal totalPressure = buyingPressure + sellingPressure;
+
+            // Handle the case where total pressure is zero to avoid division by zero
+            if (totalPressure == 0)
+            {
+                return 0; // or another appropriate value to indicate no imbalance
+            }
+
+            return (buyingPressure - sellingPressure) / totalPressure;
         }
 
         private static void UpdateOrderFlowImbalances(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<(long DateTicks, decimal Imbalance)> results)

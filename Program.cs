@@ -9,6 +9,7 @@ using SwiftLogger.Enums;
 using CryptoCandleMetricsProcessor.PostProcessing;
 using System;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoCandleMetricsProcessor
 {
@@ -16,6 +17,17 @@ namespace CryptoCandleMetricsProcessor
     {
         static async Task Main(string[] args)
         {
+            // Load configuration
+            var config = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .Build();
+
+            // Read configuration values
+            string importFolderPath = config["ImportFolderPath"] ?? throw new InvalidOperationException("ImportFolderPath is not set in the configuration.");
+            string exportFolderPath = config["ExportFolderPath"] ?? throw new InvalidOperationException("ExportFolderPath is not set in the configuration.");
+            string dbFilePath = config["DatabaseFilePath"] ?? throw new InvalidOperationException("DatabaseFilePath is not set in the configuration.");
+
             DateTime startTime = DateTime.Now;
             string timestamp = startTime.ToString("yyyyMMdd_HHmmss");
 
@@ -25,7 +37,7 @@ namespace CryptoCandleMetricsProcessor
                 .SetMinimumLogLevel(LogLevel.Information);
 
             var fileConfig = new FileLoggerConfig()
-                .SetFilePath($"MetricsProcessorLog-{timestamp}.txt")
+                .SetFilePath($"CryptoCandleMetricsProcessor-{timestamp}.txt")
                 .EnableSeparationByDate();
 
             var logger = new LoggerConfigBuilder()
@@ -35,28 +47,24 @@ namespace CryptoCandleMetricsProcessor
 
             await logger.Log(LogLevel.Information, $"Application started at: {startTime}");
 
-            // Path to the folder containing CSV files
-            string folderPath = "C:\\Users\\DELL PC\\Desktop\\Candle Data\\";
-
             // Get the field definitions from the separate class
             var fields = Fields.GetFields();
 
             // Define the mappings between CSV columns and database fields
             var mappings = new List<CsvToDbMapping>
-                {
-                    new CsvToDbMapping { CsvColumnIndex = 0, DbFieldName = "ProductId" },
-                    new CsvToDbMapping { CsvColumnIndex = 1, DbFieldName = "Granularity" },
-                    new CsvToDbMapping { CsvColumnIndex = 2, DbFieldName = "StartUnix" },
-                    new CsvToDbMapping { CsvColumnIndex = 3, DbFieldName = "StartDate" },
-                    new CsvToDbMapping { CsvColumnIndex = 4, DbFieldName = "Low" },
-                    new CsvToDbMapping { CsvColumnIndex = 5, DbFieldName = "High" },
-                    new CsvToDbMapping { CsvColumnIndex = 6, DbFieldName = "Open" },
-                    new CsvToDbMapping { CsvColumnIndex = 7, DbFieldName = "Close" },
-                    new CsvToDbMapping { CsvColumnIndex = 8, DbFieldName = "Volume" }
-                };
+            {
+                new CsvToDbMapping { CsvColumnIndex = 0, DbFieldName = "ProductId" },
+                new CsvToDbMapping { CsvColumnIndex = 1, DbFieldName = "Granularity" },
+                new CsvToDbMapping { CsvColumnIndex = 2, DbFieldName = "StartUnix" },
+                new CsvToDbMapping { CsvColumnIndex = 3, DbFieldName = "StartDate" },
+                new CsvToDbMapping { CsvColumnIndex = 4, DbFieldName = "Low" },
+                new CsvToDbMapping { CsvColumnIndex = 5, DbFieldName = "High" },
+                new CsvToDbMapping { CsvColumnIndex = 6, DbFieldName = "Open" },
+                new CsvToDbMapping { CsvColumnIndex = 7, DbFieldName = "Close" },
+                new CsvToDbMapping { CsvColumnIndex = 8, DbFieldName = "Volume" }
+            };
 
-            // Define the database file path and table name
-            string dbFilePath = "candles_data.sqlite";
+            // Define the table name
             string tableName = "Candles";
 
             bool exit = false;
@@ -70,65 +78,47 @@ namespace CryptoCandleMetricsProcessor
                 Console.WriteLine("5. Create DB Indexes");
                 Console.WriteLine("6. Post-process data");
                 Console.WriteLine("7. Export database to CSV");
-                Console.WriteLine("8. Exit");
+                Console.WriteLine("8. Perform all operations (1-7)");
+                Console.WriteLine("9. Exit");
 
                 var input = Console.ReadLine();
+                bool operationComplete = false;
+
                 switch (input)
                 {
                     case "1":
-                        await logger.Log(LogLevel.Information, "Attempting to delete existing database.");
-                        if (File.Exists(dbFilePath))
-                        {
-                            File.Delete(dbFilePath);
-                            await logger.Log(LogLevel.Information, "Existing database deleted.");
-                        }
-                        else
-                        {
-                            await logger.Log(LogLevel.Warning, "Database file not found.");
-                        }
+                        operationComplete = await DeleteDatabase(dbFilePath, logger);
                         break;
 
                     case "2":
-                        await logger.Log(LogLevel.Information, "Creating database with table.");
-                        DatabaseCreator.CreateDatabaseWithTable(dbFilePath, tableName, fields);
-                        await logger.Log(LogLevel.Information, "Database created with table.");
+                        operationComplete = await CreateDatabase(dbFilePath, tableName, fields, logger);
                         break;
 
                     case "3":
-                        await logger.Log(LogLevel.Information, "Starting CSV import process.");
-                        var csvFilePaths = Directory.GetFiles(folderPath, "*.csv");
-                        foreach (var csvFilePath in csvFilePaths)
-                        {
-                            CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
-                            await logger.Log(LogLevel.Information, $"CSV data from {csvFilePath} imported successfully.");
-                        }
+                        operationComplete = await ImportCsvFiles(importFolderPath, dbFilePath, tableName, mappings, logger);
                         break;
 
                     case "4":
-                        await logger.Log(LogLevel.Information, "Calculating technical analysis indicators.");
-                        await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
-                        await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
+                        operationComplete = await CalculateIndicators(dbFilePath, tableName, logger);
                         break;
 
                     case "5":
-                        await logger.Log(LogLevel.Information, "Creating database indexes.");
-                        await CreateDatabaseIndexes(dbFilePath, tableName, logger);
-                        await logger.Log(LogLevel.Information, "Database indexes created successfully.");
+                        operationComplete = await CreateDatabaseIndexes(dbFilePath, tableName, logger);
                         break;
 
                     case "6":
-                        await logger.Log(LogLevel.Information, "Starting data post-processing.");
-                        await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
-                        await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
+                        operationComplete = await PostProcessData(dbFilePath, tableName, logger);
                         break;
 
                     case "7":
-                        await logger.Log(LogLevel.Information, "Exporting database to CSV.");
-                        await CsvExporter.ExportDatabaseToCsvAsync(dbFilePath, logger);
-                        await logger.Log(LogLevel.Information, "CSV data exported successfully.");
+                        operationComplete = await ExportToCsv(dbFilePath, exportFolderPath, logger);
                         break;
 
                     case "8":
+                        operationComplete = await PerformAllOperations(dbFilePath, tableName, fields, importFolderPath, exportFolderPath, mappings, logger);
+                        break;
+
+                    case "9":
                         exit = true;
                         break;
 
@@ -137,7 +127,7 @@ namespace CryptoCandleMetricsProcessor
                         break;
                 }
 
-                if (!exit)
+                if (!exit && operationComplete)
                 {
                     Console.WriteLine("\nProcess completed. Press any key to return to the menu.");
                     Console.ReadKey();
@@ -153,8 +143,104 @@ namespace CryptoCandleMetricsProcessor
             await logger.Log(LogLevel.Information, $"Total time taken: {duration.Hours} hours, {duration.Minutes} minutes, {duration.Seconds} seconds");
         }
 
-        private static async Task CreateDatabaseIndexes(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
+        private static async Task<bool> DeleteDatabase(string dbFilePath, SwiftLogger.SwiftLogger logger)
         {
+            await logger.Log(LogLevel.Information, "Attempting to delete existing database.");
+            if (File.Exists(dbFilePath))
+            {
+                for (int attempts = 0; attempts < 5; attempts++)
+                {
+                    try
+                    {
+                        File.Delete(dbFilePath);
+                        await logger.Log(LogLevel.Information, "Existing database deleted.");
+                        return true;
+                    }
+                    catch (IOException ex)
+                    {
+                        await logger.Log(LogLevel.Warning, $"Attempt {attempts + 1} to delete database failed: {ex.Message}");
+                        if (attempts < 4)
+                        {
+                            await logger.Log(LogLevel.Information, "Waiting before next attempt...");
+                            await Task.Delay(1000); // Wait for 1 second before trying again
+                        }
+                    }
+                }
+                await logger.Log(LogLevel.Error, "Failed to delete database after multiple attempts. The file may be locked by another process.");
+                return false;
+            }
+            else
+            {
+                await logger.Log(LogLevel.Warning, "Database file not found.");
+                return true;
+            }
+        }
+
+        private static async Task<bool> CreateDatabase(string dbFilePath, string tableName, List<FieldDefinition> fields, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Creating database with table.");
+            try
+            {
+                await DatabaseCreator.CreateDatabaseWithTableAsync(dbFilePath, tableName, fields);
+                await logger.Log(LogLevel.Information, "Database created with table.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await logger.Log(LogLevel.Error, $"Error creating database: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                // Ensure that all connections are closed
+                SqliteConnection.ClearAllPools();
+            }
+        }
+
+        private static async Task<bool> ImportCsvFiles(string importFolderPath, string dbFilePath, string tableName, List<CsvToDbMapping> mappings, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Starting CSV import process.");
+            var csvFilePaths = Directory.GetFiles(importFolderPath, "*.csv");
+            int totalRowsImported = 0;
+
+            foreach (var csvFilePath in csvFilePaths)
+            {
+                int rowsImported = CsvImporter.ImportCsvToDatabase(csvFilePath, dbFilePath, tableName, mappings, true);
+                totalRowsImported += rowsImported;
+                await logger.Log(LogLevel.Information, $"CSV data from {Path.GetFileName(csvFilePath)} imported successfully. Rows imported: {rowsImported}");
+            }
+
+            await logger.Log(LogLevel.Information, $"CSV import process completed. Total rows imported: {totalRowsImported}");
+            return true;
+        }
+
+        private static async Task<bool> CalculateIndicators(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Calculating technical analysis indicators.");
+            await TechnicalAnalysis.CalculateIndicatorsAsync(dbFilePath, tableName, logger);
+            await logger.Log(LogLevel.Information, "Indicators calculated successfully.");
+            return true;
+        }
+
+        private static async Task<bool> PostProcessData(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Starting data post-processing.");
+            await DataPostProcessor.ProcessDataAsync(dbFilePath, tableName, logger);
+            await logger.Log(LogLevel.Information, "Data post-processing completed successfully.");
+            return true;
+        }
+
+        private static async Task<bool> ExportToCsv(string dbFilePath, string exportFolderPath, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Exporting database to CSV.");
+            await CsvExporter.ExportDatabaseToCsvAsync(dbFilePath, logger, exportFolderPath);
+            await logger.Log(LogLevel.Information, "CSV data exported successfully.");
+            return true;
+        }
+
+        private static async Task<bool> CreateDatabaseIndexes(string dbFilePath, string tableName, SwiftLogger.SwiftLogger logger)
+        {
+            await logger.Log(LogLevel.Information, "Creating database indexes.");
             using (var connection = new SqliteConnection($"Data Source={dbFilePath}"))
             {
                 await connection.OpenAsync();
@@ -193,6 +279,20 @@ namespace CryptoCandleMetricsProcessor
                     await logger.Log(LogLevel.Information, $"Executed: {cmd}");
                 }
             }
+            await logger.Log(LogLevel.Information, "Database indexes created successfully.");
+            return true;
+        }
+
+        private static async Task<bool> PerformAllOperations(string dbFilePath, string tableName, List<FieldDefinition> fields, string importFolderPath, string exportFolderPath, List<CsvToDbMapping> mappings, SwiftLogger.SwiftLogger logger)
+        {
+            if (!await DeleteDatabase(dbFilePath, logger)) return false;
+            if (!await CreateDatabase(dbFilePath, tableName, fields, logger)) return false;
+            if (!await ImportCsvFiles(importFolderPath, dbFilePath, tableName, mappings, logger)) return false;
+            if (!await CalculateIndicators(dbFilePath, tableName, logger)) return false;
+            if (!await CreateDatabaseIndexes(dbFilePath, tableName, logger)) return false;
+            if (!await PostProcessData(dbFilePath, tableName, logger)) return false;
+            if (!await ExportToCsv(dbFilePath, exportFolderPath, logger)) return false;
+            return true;
         }
     }
 }

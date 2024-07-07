@@ -30,7 +30,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in williamsRResults)
             {
-                williamsRData.Add((result.Date.Ticks, (decimal)result.WilliamsR));
+                williamsRData.Add((result.Date.Ticks, (decimal)result.WilliamsR!));
             }
 
             string updateQuery = $@"

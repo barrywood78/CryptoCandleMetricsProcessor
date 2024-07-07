@@ -25,7 +25,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Calculate ATR results using the Skender.Stock.Indicators library
             var atrResults = candles.GetAtr(period)
                                     .Where(r => r.Atr.HasValue)
-                                    .Select(r => new { r.Date, Atr = r.Atr.Value })
+                                    .Select(r => new { r.Date, Atr = r.Atr!.Value })
                                     .ToList();
 
             string updateQuery = $@"

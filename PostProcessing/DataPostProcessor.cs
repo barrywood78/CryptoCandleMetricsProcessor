@@ -114,12 +114,27 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
         {
             try
             {
-                await BackfillFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Starting batch processing for {productId} - {granularity} at offset {offset}");
+
+                await BackfillFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, logger);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed backfilling fields for {productId} - {granularity} at offset {offset}");
+
                 await FillWithNeutralValueInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed filling neutral values for {productId} - {granularity} at offset {offset}");
+
                 await FillBooleanFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed filling boolean fields for {productId} - {granularity} at offset {offset}");
+
                 await FillCategoricalFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
-                await BackfillLaggedFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed filling categorical fields for {productId} - {granularity} at offset {offset}");
+
+                await BackfillLaggedFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize, logger);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed backfilling lagged fields for {productId} - {granularity} at offset {offset}");
+
                 await FillSpecificFieldsInBatch(connection, transaction, tableName, productId, granularity, offset, batchSize);
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed filling specific fields for {productId} - {granularity} at offset {offset}");
+
+                await ThreadSafeLog(logger, LogLevel.Information, $"Completed batch processing for {productId} - {granularity} at offset {offset}");
             }
             catch (Exception ex)
             {
@@ -128,36 +143,39 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             }
         }
 
-        private static async Task BackfillFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
+        private static async Task BackfillFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize, SwiftLogger.SwiftLogger logger)
         {
             var fields = new[] { "SMA", "EMA", "ATR", "TEMA", "BB_SMA", "BB_UpperBand", "BB_LowerBand",
-                                 "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
-                                 "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
-                                 "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
-                                 "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
-                                 "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel" };
+                         "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
+                         "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
+                         "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
+                         "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
+                         "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel" };
 
-            foreach (var field in fields)
+            for (int i = 0; i < fields.Length; i++)
             {
+                var field = fields[i];
+                var startTime = DateTime.Now;
+
                 var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandText = $@"
-                    UPDATE {tableName}
-                    SET {field} = (
-                        SELECT {field}
-                        FROM {tableName} AS t2
-                        WHERE t2.ProductId = @productId
-                          AND t2.Granularity = @granularity
-                          AND t2.{field} IS NOT NULL
-                          AND t2.Id <= {tableName}.Id
-                          AND t2.Id BETWEEN @offset AND @endOffset
-                        ORDER BY t2.Id DESC
-                        LIMIT 1
-                    )
-                    WHERE ProductId = @productId
-                      AND Granularity = @granularity
-                      AND {field} IS NULL
-                      AND Id BETWEEN @offset AND @endOffset";
+                                        UPDATE {tableName}
+                                        SET {field} = (
+                                            SELECT {field}
+                                            FROM {tableName} AS t2
+                                            WHERE t2.ProductId = @productId
+                                              AND t2.Granularity = @granularity
+                                              AND t2.{field} IS NOT NULL
+                                              AND t2.Id <= {tableName}.Id
+                                              AND t2.Id BETWEEN @offset AND @endOffset
+                                            ORDER BY t2.Id DESC
+                                            LIMIT 1
+                                        )
+                                        WHERE ProductId = @productId
+                                          AND Granularity = @granularity
+                                          AND {field} IS NULL
+                                          AND Id BETWEEN @offset AND @endOffset";
 
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
@@ -165,6 +183,10 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
                 await command.ExecuteNonQueryAsync();
+
+                var endTime = DateTime.Now;
+                var duration = (endTime - startTime).TotalSeconds;
+                await ThreadSafeLog(logger, LogLevel.Information, $"Backfilled {field} ({i + 1}/{fields.Length}) in {duration:F2} seconds for {productId} - {granularity}");
             }
         }
 
@@ -255,44 +277,47 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
             }
         }
 
-        private static async Task BackfillLaggedFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize)
+        private static async Task BackfillLaggedFieldsInBatch(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, long offset, int batchSize, SwiftLogger.SwiftLogger logger)
         {
             var laggedFields = new[]
             {
-                "Lagged_Close_1", "Lagged_Close_2", "Lagged_Close_3",
-                "Lagged_RSI_1", "Lagged_RSI_2", "Lagged_RSI_3",
-                "Lagged_Return_1", "Lagged_Return_2", "Lagged_Return_3",
-                "Lagged_EMA_1", "Lagged_EMA_2", "Lagged_EMA_3",
-                "Lagged_ATR_1", "Lagged_ATR_2", "Lagged_ATR_3",
-                "Lagged_MACD_1", "Lagged_MACD_2", "Lagged_MACD_3",
-                "Lagged_BollingerUpper_1", "Lagged_BollingerUpper_2", "Lagged_BollingerUpper_3",
-                "Lagged_BollingerLower_1", "Lagged_BollingerLower_2", "Lagged_BollingerLower_3",
-                "Lagged_BollingerPercentB_1", "Lagged_BollingerPercentB_2", "Lagged_BollingerPercentB_3",
-                "Lagged_StochK_1", "Lagged_StochK_2", "Lagged_StochK_3",
-                "Lagged_StochD_1", "Lagged_StochD_2", "Lagged_StochD_3"
-            };
+        "Lagged_Close_1", "Lagged_Close_2", "Lagged_Close_3",
+        "Lagged_RSI_1", "Lagged_RSI_2", "Lagged_RSI_3",
+        "Lagged_Return_1", "Lagged_Return_2", "Lagged_Return_3",
+        "Lagged_EMA_1", "Lagged_EMA_2", "Lagged_EMA_3",
+        "Lagged_ATR_1", "Lagged_ATR_2", "Lagged_ATR_3",
+        "Lagged_MACD_1", "Lagged_MACD_2", "Lagged_MACD_3",
+        "Lagged_BollingerUpper_1", "Lagged_BollingerUpper_2", "Lagged_BollingerUpper_3",
+        "Lagged_BollingerLower_1", "Lagged_BollingerLower_2", "Lagged_BollingerLower_3",
+        "Lagged_BollingerPercentB_1", "Lagged_BollingerPercentB_2", "Lagged_BollingerPercentB_3",
+        "Lagged_StochK_1", "Lagged_StochK_2", "Lagged_StochK_3",
+        "Lagged_StochD_1", "Lagged_StochD_2", "Lagged_StochD_3"
+    };
 
-            foreach (var laggedField in laggedFields)
+            for (int i = 0; i < laggedFields.Length; i++)
             {
+                var laggedField = laggedFields[i];
+                var startTime = DateTime.Now;
+
                 var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandText = $@"
-                    UPDATE {tableName}
-                    SET {laggedField} = (
-                        SELECT {laggedField}
-                        FROM {tableName} AS t2
-                        WHERE t2.ProductId = @productId
-                          AND t2.Granularity = @granularity
-                          AND t2.Id < {tableName}.Id
-                          AND t2.Id BETWEEN @offset AND @endOffset
-                          AND t2.{laggedField} IS NOT NULL
-                        ORDER BY t2.Id DESC
-                        LIMIT 1
-                    )
-                    WHERE ProductId = @productId
-                      AND Granularity = @granularity
-                      AND {laggedField} IS NULL
-                      AND Id BETWEEN @offset AND @endOffset";
+                                    UPDATE {tableName}
+                                    SET {laggedField} = (
+                                        SELECT {laggedField}
+                                        FROM {tableName} AS t2
+                                        WHERE t2.ProductId = @productId
+                                          AND t2.Granularity = @granularity
+                                          AND t2.Id < {tableName}.Id
+                                          AND t2.Id BETWEEN @offset AND @endOffset
+                                          AND t2.{laggedField} IS NOT NULL
+                                        ORDER BY t2.Id DESC
+                                        LIMIT 1
+                                    )
+                                    WHERE ProductId = @productId
+                                      AND Granularity = @granularity
+                                      AND {laggedField} IS NULL
+                                      AND Id BETWEEN @offset AND @endOffset";
 
                 command.Parameters.AddWithValue("@productId", productId);
                 command.Parameters.AddWithValue("@granularity", granularity);
@@ -300,6 +325,10 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                 command.Parameters.AddWithValue("@endOffset", offset + batchSize - 1);
 
                 await command.ExecuteNonQueryAsync();
+
+                var endTime = DateTime.Now;
+                var duration = (endTime - startTime).TotalSeconds;
+                await ThreadSafeLog(logger, LogLevel.Information, $"Backfilled {laggedField} ({i + 1}/{laggedFields.Length}) in {duration:F2} seconds for {productId} - {granularity}");
             }
         }
 

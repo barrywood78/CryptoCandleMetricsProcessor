@@ -31,7 +31,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Prepare results for batch update
             foreach (var result in supertrendResults)
             {
-                supertrendData.Add((result.Date.Ticks, (decimal)result.SuperTrend));
+                supertrendData.Add((result.Date.Ticks, (decimal)result.SuperTrend!));
             }
 
             string updateQuery = $@"

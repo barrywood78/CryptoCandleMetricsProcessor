@@ -19,7 +19,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 if (atrResults[i].Atr.HasValue)
                 {
-                    double atrPercent = (double)atrResults[i].Atr.Value / (double)candles[i].Close;
+                    double atrPercent = (double)atrResults[i].Atr!.Value / (double)candles[i].Close;
                     atrPercentResults.Add((candles[i].Date.Ticks, atrPercent));
                 }
             }

@@ -31,7 +31,6 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
         {
             var lnLengths = new List<double>();
             var lnKs = new List<double>();
-
             for (int k = 1; k <= kmax; k++)
             {
                 double length = Enumerable.Range(0, k)
@@ -43,41 +42,50 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                     })
                     .Sum();
 
-                length *= (data.Length - 1) / (Math.Pow(k, 2) * ((data.Length - 1) / k));
-                lnLengths.Add(Math.Log(length));
-                lnKs.Add(Math.Log(1.0 / k));
+                if (length > 0)
+                {
+                    length *= (data.Length - 1) / (Math.Pow(k, 2) * ((data.Length - 1) / k));
+                    lnLengths.Add(Math.Log(length));
+                    lnKs.Add(Math.Log(1.0 / k));
+                }
+            }
+
+            // Check if we have enough data points for regression
+            if (lnLengths.Count < 2)
+            {
+                return 0; // or another appropriate default value
             }
 
             // Use MathNet.Numerics for linear regression
             double[] x = lnKs.ToArray();
             double[] y = lnLengths.ToArray();
             var p = Fit.Line(x, y);
-
-            return p.Item2; // Return the slope
+            return double.IsNaN(p.Item2) || double.IsInfinity(p.Item2) ? 0 : p.Item2; // Return the slope or 0 if it's NaN or Infinity
         }
 
         private static void UpdateFractalDimensions(SqliteConnection connection, SqliteTransaction transaction, string tableName, string productId, string granularity, List<(long DateTicks, double FractalDimension)> results)
         {
             string updateQuery = $@"
-                UPDATE {tableName}
-                SET FractalDimension = @FractalDimension
-                WHERE ProductId = @ProductId
-                  AND Granularity = @Granularity
-                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
-
+        UPDATE {tableName}
+        SET FractalDimension = @FractalDimension
+        WHERE ProductId = @ProductId
+          AND Granularity = @Granularity
+          AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
             using var command = new SqliteCommand(updateQuery, connection, transaction);
             command.Parameters.Add("@FractalDimension", SqliteType.Real);
             command.Parameters.Add("@ProductId", SqliteType.Text).Value = productId;
             command.Parameters.Add("@Granularity", SqliteType.Text).Value = granularity;
             command.Parameters.Add("@StartDate", SqliteType.Integer);
-
             foreach (var batch in results.Chunk(BatchSize))
             {
                 foreach (var (dateTicks, fractalDimension) in batch)
                 {
-                    command.Parameters["@FractalDimension"].Value = fractalDimension;
-                    command.Parameters["@StartDate"].Value = dateTicks;
-                    command.ExecuteNonQuery();
+                    if (!double.IsNaN(fractalDimension) && !double.IsInfinity(fractalDimension))
+                    {
+                        command.Parameters["@FractalDimension"].Value = fractalDimension;
+                        command.Parameters["@StartDate"].Value = dateTicks;
+                        command.ExecuteNonQuery();
+                    }
                 }
             }
         }

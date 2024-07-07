@@ -37,16 +37,16 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
                                    .ToList();
 
             string updateQuery = $@"
-                UPDATE {tableName}
-                SET BB_SMA = @BB_SMA, 
-                    BB_UpperBand = @BB_UpperBand, 
-                    BB_LowerBand = @BB_LowerBand, 
-                    BB_PercentB = @BB_PercentB, 
-                    BB_ZScore = @BB_ZScore, 
-                    BB_Width = @BB_Width
-                WHERE ProductId = @ProductId
-                  AND Granularity = @Granularity
-                  AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
+        UPDATE {tableName}
+        SET BB_SMA = @BB_SMA, 
+            BB_UpperBand = @BB_UpperBand, 
+            BB_LowerBand = @BB_LowerBand, 
+            BB_PercentB = @BB_PercentB, 
+            BB_ZScore = @BB_ZScore, 
+            BB_Width = @BB_Width
+        WHERE ProductId = @ProductId
+          AND Granularity = @Granularity
+          AND StartDate = datetime(@StartDate / 10000000 - 62135596800, 'unixepoch')";
 
             using var command = new SqliteCommand(updateQuery, connection, transaction);
             command.Parameters.Add("@BB_SMA", SqliteType.Real);
@@ -63,14 +63,21 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             {
                 foreach (var result in batch)
                 {
-                    command.Parameters["@BB_SMA"].Value = result.Sma;
-                    command.Parameters["@BB_UpperBand"].Value = result.UpperBand;
-                    command.Parameters["@BB_LowerBand"].Value = result.LowerBand;
-                    command.Parameters["@BB_PercentB"].Value = result.PercentB;
-                    command.Parameters["@BB_ZScore"].Value = result.ZScore;
-                    command.Parameters["@BB_Width"].Value = result.Width;
-                    command.Parameters["@StartDate"].Value = result.Date.Ticks;
-                    command.ExecuteNonQuery();
+                    try
+                    {
+                        command.Parameters["@BB_SMA"].Value = result.Sma ?? (object)DBNull.Value;
+                        command.Parameters["@BB_UpperBand"].Value = result.UpperBand ?? (object)DBNull.Value;
+                        command.Parameters["@BB_LowerBand"].Value = result.LowerBand ?? (object)DBNull.Value;
+                        command.Parameters["@BB_PercentB"].Value = result.PercentB ?? (object)DBNull.Value;
+                        command.Parameters["@BB_ZScore"].Value = result.ZScore ?? (object)DBNull.Value;
+                        command.Parameters["@BB_Width"].Value = result.Width ?? (object)DBNull.Value;
+                        command.Parameters["@StartDate"].Value = result.Date.Ticks;
+                        command.ExecuteNonQuery();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error updating Bollinger Bands for {productId} - {granularity} at {result.Date}: {ex.Message}");
+                    }
                 }
             }
         }

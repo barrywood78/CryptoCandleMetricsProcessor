@@ -25,7 +25,7 @@ namespace CryptoCandleMetricsProcessor.Analysis.Indicators
             // Calculate ADX results using the Skender.Stock.Indicators library
             var adxResults = candles.GetAdx(period)
                                     .Where(r => r.Adx.HasValue)
-                                    .Select(r => new { r.Date, Value = r.Adx.Value })
+                                    .Select(r => new { r.Date, Value = r.Adx!.Value })
                                     .ToList();
 
             string updateQuery = $@"
