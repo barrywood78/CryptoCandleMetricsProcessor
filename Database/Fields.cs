@@ -58,11 +58,11 @@ namespace CryptoCandleMetricsProcessor.Database
                 new FieldDefinition { Name = "Support1", DataType = "REAL" },  // Pivot Point - Support 1
                 new FieldDefinition { Name = "Support2", DataType = "REAL" },  // Pivot Point - Support 2
                 new FieldDefinition { Name = "Support3", DataType = "REAL" },  // Pivot Point - Support 3
-                new FieldDefinition { Name = "FibRetracement_23_6", DataType = "REAL" },  // Fibonacci Retracement - 23.6%
-                new FieldDefinition { Name = "FibRetracement_38_2", DataType = "REAL" },  // Fibonacci Retracement - 38.2%
-                new FieldDefinition { Name = "FibRetracement_50", DataType = "REAL" },  // Fibonacci Retracement - 50%
-                new FieldDefinition { Name = "FibRetracement_61_8", DataType = "REAL" },  // Fibonacci Retracement - 61.8%
-                new FieldDefinition { Name = "FibRetracement_78_6", DataType = "REAL" },  // Fibonacci Retracement - 76.4%
+                //new FieldDefinition { Name = "FibRetracement_23_6", DataType = "REAL" },  // Fibonacci Retracement - 23.6%
+                //new FieldDefinition { Name = "FibRetracement_38_2", DataType = "REAL" },  // Fibonacci Retracement - 38.2%
+                //new FieldDefinition { Name = "FibRetracement_50", DataType = "REAL" },  // Fibonacci Retracement - 50%
+                //new FieldDefinition { Name = "FibRetracement_61_8", DataType = "REAL" },  // Fibonacci Retracement - 61.8%
+                //new FieldDefinition { Name = "FibRetracement_78_6", DataType = "REAL" },  // Fibonacci Retracement - 76.4%
                 new FieldDefinition { Name = "Lagged_Close_1", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_Close_2", DataType = "REAL" },
                 new FieldDefinition { Name = "Lagged_Close_3", DataType = "REAL" },

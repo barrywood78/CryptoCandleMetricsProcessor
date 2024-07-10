@@ -149,7 +149,6 @@ namespace CryptoCandleMetricsProcessor.PostProcessing
                          "MACD", "MACD_Signal", "SuperTrend", "OBV", "RollingMean", "RollingStdDev",
                          "RollingVariance", "RollingSkewness", "RollingKurtosis", "ADL", "ParabolicSar",
                          "PivotPoint", "Resistance1", "Resistance2", "Resistance3", "Support1", "Support2", "Support3",
-                         "FibRetracement_23_6", "FibRetracement_38_2", "FibRetracement_50", "FibRetracement_61_8", "FibRetracement_78_6",
                          "VWAP", "DynamicSupportLevel", "DynamicResistanceLevel" };
 
             for (int i = 0; i < fields.Length; i++)

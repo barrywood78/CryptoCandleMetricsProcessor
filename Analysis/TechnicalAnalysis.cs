@@ -339,7 +339,7 @@ namespace CryptoCandleMetricsProcessor.Analysis
                 {"CCI", (conn, trans, table, prod, gran, c, p) => CciIndicator.Calculate(conn, trans, table, prod, gran, c, p["CCI"])},
                 {"ParabolicSAR", (conn, trans, table, prod, gran, c, p) => ParabolicSarIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"RollingPivotPoints", (conn, trans, table, prod, gran, c, p) => RollingPivotPointsIndicator.Calculate(conn, trans, table, prod, gran, c, (int)PeriodSize.Day, 10, (int)PivotPointType.Standard)},
-                {"FibonacciRetracement", (conn, trans, table, prod, gran, c, p) => FibonacciRetracementIndicator.Calculate(conn, trans, table, prod, gran, c)},
+                //{"FibonacciRetracement", (conn, trans, table, prod, gran, c, p) => FibonacciRetracementIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"LaggedFeatures", (conn, trans, table, prod, gran, c, p) => LaggedFeaturesIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"ADLChange", (conn, trans, table, prod, gran, c, p) => ADLChangeIndicator.Calculate(conn, trans, table, prod, gran, c)},
                 {"ATRPercent", (conn, trans, table, prod, gran, c, p) => ATRPercentIndicator.Calculate(conn, trans, table, prod, gran, c, p["ATR"])},
